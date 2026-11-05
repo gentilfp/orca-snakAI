@@ -33,6 +33,22 @@ Hit a wall or your own tail and it's game over. Your best score is saved in the 
 
 You need Orca 1.4.245 or newer.
 
+In Orca:
+
+1. Open **Settings → Plugins**, choose **Add plugin**, then **From a Git URL…**
+2. Paste this and choose **Install**:
+
+   ```
+   https://github.com/gentilfp/orca-snakai#v0.1.0
+   ```
+
+3. Review the access it asks for (it asks for none beyond its own panel), then enable it.
+4. Open **Orca snakAI** from the right sidebar.
+
+Click the board once so it gets the keyboard, and you're playing.
+
+### From source
+
 ```sh
 git clone https://github.com/gentilfp/orca-snakAI.git
 cd orca-snakAI
@@ -41,7 +57,6 @@ orca plugin open gentilfp.orca-snakai --panel snakai
 ```
 
 Orca may print a fingerprint the first time. Re-run the `load` command with `--approve <fingerprint>`.
-Or open the panel from the **Orca snakAI** icon in the right sidebar.
 
 No Orca? Open `dev.html` in any browser and play there.
 
