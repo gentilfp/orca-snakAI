@@ -6,4 +6,4 @@ A tiny Snake game that lives inside Orca, as a side panel plugin. Eat coding age
 
 The plugin is in [`plugins/orca-snakai`](plugins/orca-snakai). Its README has the controls and how to install it.
 
-MIT licensed.
+MIT licensed. A fan project, not affiliated with Orca, Anthropic or OpenAI. The pixel art is hand drawn.

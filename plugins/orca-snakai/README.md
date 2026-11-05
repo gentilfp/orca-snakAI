@@ -55,6 +55,7 @@ node plugins/orca-snakai/scripts/build.mjs        # rebuild panel/index.html
 node --test plugins/orca-snakai/tests/*.test.mjs  # run the tests
 ```
 
-The pixel art is hand drawn and is not the official logo of any product.
+The pixel art is hand drawn and is not the official logo of any product. This is a fan project, not
+affiliated with Orca, Anthropic or OpenAI.
 
 MIT licensed. See [LICENSE](LICENSE).
