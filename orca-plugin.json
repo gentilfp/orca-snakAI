@@ -7,7 +7,7 @@
   "execution": "sandboxed-ui",
   "description": "A pixel art Snake for the Orca panel. Swim through the ocean, catch coding agents and dodge the bugs.",
   "license": "MIT",
-  "repository": "https://github.com/gentilfp/orca-snakAI/tree/main/plugins/orca-snakai",
+  "repository": "https://github.com/gentilfp/orca-snakAI",
   "engines": { "orca": ">=1.4.245" },
   "cover": {
     "path": "images/cover.png",
