@@ -4,8 +4,12 @@
   const COLUMNS = 24;
   const ROWS = 16;
   const CELL = 30;
-  // Every sprite is a 6x6 grid of 5px art pixels, so 6 * ART fills one 30px cell exactly.
+  // Text and effects use 5px art pixels. Board sprites are 10x10 grids, so each sprite pixel is 3px.
   const ART = 5;
+  // The score strip sits above the board, so nothing on the board can ever cover it.
+  const HUD_H = 60;
+  const BOARD_W = COLUMNS * CELL;
+  const BOARD_H = ROWS * CELL;
 
   // Fixed simulation constants. OSN-3 renders 720x480 as a 24x16 grid of 30px cells.
   const DIRECTIONS = {
@@ -18,10 +22,21 @@
   const PHASES = ['ready', 'running', 'paused', 'gameover'];
   const START_SNAKE = [{ x: 6, y: 8 }, { x: 5, y: 8 }, { x: 4, y: 8 }];
   const PICKUPS = {
-    orca: { points: 10, growth: 1, boostMs: 0, shieldMs: 0 },
+    pi: { points: 10, growth: 1, boostMs: 0, shieldMs: 0 },
     claude: { points: 25, growth: 2, boostMs: 3000, shieldMs: 0 },
-    codex: { points: 50, growth: 3, boostMs: 0, shieldMs: 5000 }
+    codex: { points: 50, growth: 3, boostMs: 0, shieldMs: 5000 },
+    // A rare bonus: worth a lot and it chases every bug off the board.
+    orca: { points: 100, growth: 1, boostMs: 0, shieldMs: 0, clearsBug: true }
   };
+  // A bug is a hazard, not a pickup: touching it costs points and cuts the snake in half.
+  // A live shield squashes the bug instead and is used up.
+  const AGENTS = ['pi', 'claude', 'codex'];
+  const ORCA_CHANCE = 0.02;
+  const BUG_PENALTY = 20;
+  const MIN_LENGTH = START_SNAKE.length;
+  // It appears after an agent is collected, when the roll is at least 1 - BUG_CHANCE, and keeps away from the head.
+  const BUG_CHANCE = 0.5;
+  const BUG_MIN_DISTANCE = 4;
   // OSN-5: a spawned pickup expires after a random whole number of milliseconds in [8000, 12000].
   const PICKUP_TTL_MIN_MS = 8000;
   const BOOST_FACTOR = 0.7;
@@ -58,9 +73,9 @@
 
   function pickKind(random) {
     const roll = unitRandom(random);
-    if (roll < 0.7) return 'orca';
-    if (roll < 0.95) return 'claude';
-    return 'codex';
+    // The Orca is the rare bonus. The other 98% is split evenly between the three agents.
+    if (roll >= 1 - ORCA_CHANCE) return 'orca';
+    return AGENTS[Math.floor((roll / (1 - ORCA_CHANCE)) * AGENTS.length)];
   }
 
   // The lifetime roll is the third and last draw of a spawn, so cell and kind stay deterministic.
@@ -89,6 +104,10 @@
     let direction;
     let queuedDirections;
     let pickup;
+    let bug;
+    let bugHits;
+    let bugBlocks;
+    let cause;
     let score;
     let best;
     let growthPending;
@@ -106,22 +125,30 @@
         direction: direction,
         queuedDirections: queuedDirections.slice(),
         pickup: pickup ? { x: pickup.x, y: pickup.y, kind: pickup.kind, expiresAt: pickup.expiresAt } : null,
+        bug: bug ? { x: bug.x, y: bug.y, expiresAt: bug.expiresAt } : null,
+        bugHits: bugHits,
+        bugBlocks: bugBlocks,
         score: score,
         best: best,
         growthPending: growthPending,
         boostUntil: boostUntil,
         shieldUntil: shieldUntil,
-        result: result
+        result: result,
+        cause: cause
       };
     }
 
-    function finish(outcome) {
+    function finish(outcome, reason) {
       phase = 'gameover';
       result = outcome;
+      cause = reason;
       queuedDirections = [];
       readyAt = null;
       pausedAt = null;
-      if (outcome === 'won') pickup = null;
+      if (outcome === 'won') {
+        pickup = null;
+        bug = null;
+      }
     }
 
     function persistBest(value) {
@@ -151,9 +178,14 @@
     }
 
     function spawnPickup(at) {
-      const cells = freeCells();
+      let cells = freeCells().filter(function (cell) { return !bug || bug.x !== cell.x || bug.y !== cell.y; });
+      // A bug must never be the reason the board looks full.
+      if (!cells.length && bug) {
+        bug = null;
+        cells = freeCells();
+      }
       if (!cells.length) {
-        finish('won');
+        finish('won', 'full');
         return;
       }
       const index = Math.floor(unitRandom(random) * cells.length);
@@ -163,9 +195,31 @@
       pickup = { x: cell.x, y: cell.y, kind: kind, expiresAt: at + pickupTtl(random) };
     }
 
+    // Cell, then lifetime, drawn only when the chance roll passes, so a zero stream never spawns a bug.
+    function maybeSpawnBug(at) {
+      if (bug || phase !== 'running') return;
+      if (unitRandom(random) < 1 - BUG_CHANCE) return;
+      const head = snake[0];
+      const cells = freeCells().filter(function (cell) {
+        if (pickup && pickup.x === cell.x && pickup.y === cell.y) return false;
+        return Math.abs(cell.x - head.x) + Math.abs(cell.y - head.y) >= BUG_MIN_DISTANCE;
+      });
+      if (!cells.length) return;
+      const cell = cells[Math.floor(unitRandom(random) * cells.length)];
+      bug = { x: cell.x, y: cell.y, expiresAt: at + pickupTtl(random) };
+    }
+
+    function hurtByBug() {
+      score = Math.max(0, score - BUG_PENALTY);
+      growthPending = 0;
+      const keep = Math.max(MIN_LENGTH, Math.ceil(snake.length / 2));
+      if (snake.length > keep) snake.length = keep;
+    }
+
     function shiftDeadlines(elapsed) {
       if (elapsed <= 0) return;
       if (pickup && pickup.expiresAt > 0) pickup.expiresAt += elapsed;
+      if (bug && bug.expiresAt > 0) bug.expiresAt += elapsed;
       if (boostUntil > 0) boostUntil += elapsed;
       if (shieldUntil > 0) shieldUntil += elapsed;
     }
@@ -184,6 +238,10 @@
       boostUntil = 0;
       shieldUntil = 0;
       result = null;
+      cause = null;
+      bug = null;
+      bugHits = 0;
+      bugBlocks = 0;
       readyAt = null;
       pausedAt = null;
       phase = 'ready';
@@ -206,10 +264,20 @@
         ? {
           x: toInteger(seed.pickup.x, 0),
           y: toInteger(seed.pickup.y, 0),
-          kind: PICKUPS[seed.pickup.kind] ? seed.pickup.kind : 'orca',
+          kind: PICKUPS[seed.pickup.kind] ? seed.pickup.kind : 'pi',
           expiresAt: toInteger(seed.pickup.expiresAt, at + PICKUP_TTL_MIN_MS)
         }
         : null;
+      bug = seed.bug
+        ? {
+          x: toInteger(seed.bug.x, 0),
+          y: toInteger(seed.bug.y, 0),
+          expiresAt: toInteger(seed.bug.expiresAt, at + PICKUP_TTL_MIN_MS)
+        }
+        : null;
+      bugHits = toInteger(seed.bugHits, 0);
+      bugBlocks = toInteger(seed.bugBlocks, 0);
+      cause = typeof seed.cause === 'string' ? seed.cause : null;
       score = toInteger(seed.score, 0);
       growthPending = toInteger(seed.growthPending, 0);
       boostUntil = toInteger(seed.boostUntil, 0);
@@ -279,6 +347,7 @@
       const at = now();
       clearExpiredEffects(at);
       // A pickup left past its deadline respawns before the move; paused boards never reach here.
+      if (bug && at >= bug.expiresAt) bug = null;
       if (pickup && at >= pickup.expiresAt) spawnPickup(at);
       if (phase !== 'running') return snapshot();
 
@@ -287,6 +356,8 @@
       const nextX = snake[0].x + vector.x;
       const nextY = snake[0].y + vector.y;
       const collects = pickup !== null && pickup.x === nextX && pickup.y === nextY;
+      const touchesBug = bug !== null && bug.x === nextX && bug.y === nextY;
+      let orcaEaten = false;
       // Growth keeps the tail, so entering the tail cell is only legal when nothing grows.
       const grows = collects || growthPending > 0;
       const hitsWall = nextX < 0 || nextX >= COLUMNS || nextY < 0 || nextY >= ROWS;
@@ -297,9 +368,9 @@
           shieldUntil = 0;
           queuedDirections = [];
           snake.pop();
-          if (!snake.length) finish('lost');
+          if (!snake.length) finish('lost', hitsWall ? 'wall' : 'body');
         } else {
-          finish('lost');
+          finish('lost', hitsWall ? 'wall' : 'body');
         }
         return snapshot();
       }
@@ -315,6 +386,10 @@
         growth += reward.growth;
         if (reward.boostMs) boostUntil = at + reward.boostMs;
         if (reward.shieldMs) shieldUntil = at + reward.shieldMs;
+        if (reward.clearsBug) {
+          bug = null;
+          orcaEaten = true;
+        }
         if (score > best) {
           best = score;
           persistBest(best);
@@ -330,8 +405,23 @@
         snake.pop();
       }
 
-      if (pickup === null) spawnPickup(at);
-      if (phase === 'running' && snake.length >= COLUMNS * ROWS) finish('won');
+      if (touchesBug) {
+        bug = null;
+        if (shieldUntil > 0 && at < shieldUntil) {
+          shieldUntil = 0;
+          bugBlocks += 1;
+        } else {
+          hurtByBug();
+          bugHits += 1;
+        }
+      }
+
+      if (pickup === null) {
+        spawnPickup(at);
+        // The orca just cleared the water, so no new bug right behind it.
+        if (!orcaEaten) maybeSpawnBug(at);
+      }
+      if (phase === 'running' && snake.length >= COLUMNS * ROWS) finish('won', 'full');
       return snapshot();
     }
 
@@ -398,41 +488,208 @@
   };
 
   // ---- Renderer -----------------------------------------------------------------------------
-  // One character per art pixel; '.' is transparent. The snake and pickups are original art.
+  // One character per sprite pixel; '.' is transparent. The snake and the bug are 10x10 grids of 3px
+  // pixels. The pickups are the author's own 8-bit art on 30x30 grids of 1px pixels.
   const HEAD_ART = [
-    '.gggg.',
-    'gggwkg',
-    'gggggg',
-    'gggggg',
-    'gggwkg',
-    '.gggg.'
+    '..gggggg..',
+    '.gggggggg.',
+    'ggggggwwkg',
+    'ggggggwwkg',
+    'gggggggggg',
+    'gggggggggg',
+    'ggggggwwkg',
+    'ggggggwwkg',
+    '.gggggggg.',
+    '..gggggg..'
   ];
   const BODY_ART = [
-    '.gggg.',
-    'gggggg',
-    'ggghgg',
-    'gggggg',
-    'gggggg',
-    '.gggg.'
+    '..gggggg..',
+    '.gggggggg.',
+    'ghhggggggg',
+    'ghgggggggg',
+    'gggggddggg',
+    'gggggddggg',
+    'gggggggggg',
+    'gggggggggg',
+    '.gggggggg.',
+    '..gggggg..'
   ];
   const PICKUP_ART = {
-    // Orca: a blunt little whale, dark back and pale belly.
-    orca: {
-      rows: ['..kk..', '.kkkkk', 'kkwkkk', 'kwwwwk', '.kwwk.', '..kk..'],
-      colors: { k: '#10263a', w: '#f4fbff' }
+    // Pi: the author's own 8-bit art, on a 30x30 grid of 1px pixels.
+    pi: {
+      rows: [
+        '...aaaaaaaaaaaaaaaaaaaa.......',
+        '...aaaaaaaaaaaaaaaaaaaa.......',
+        '...aaaaaaaaaaaaaaaaaaaa.......',
+        'aaaaaaaaaaaaaaaaaaaaaaaaa.....',
+        'aaaaaaaaaaaaaaaaaaaaaaaaa.....',
+        'aaaaaaaaaaaaaaaaaaaaaaaaa.....',
+        'aaaaaaaaaaaaaaaaaaaaaaaaa.....',
+        'aaaaaaaaaaaaaaaaaaaaaaaaa.....',
+        'bbbbbbbb........aaaaaaaaa.....',
+        'cccccccc........aaaaaaaaa.....',
+        'cccccccc........aaaaaaaaa.....',
+        'cccccccc........aaaaaaaaa.....',
+        'cccccccc........aaaaaaaaa.....',
+        'cccccccc........aaaaaaaaa.....',
+        'cccccccc........aaaaaaaaa.....',
+        'cccccccc........baaaaaaaad....',
+        'cccccccccccccccc......dddddddd',
+        'cccccccccccccccc......dddddddd',
+        'cccccccccccccccc......dddddddd',
+        'cccccccccccccccc......dddddddd',
+        'cccccccccccccccc......dddddddd',
+        'cccccccccccccccc......dddddddd',
+        'cccccccccccccccc......dddddddd',
+        'cccccccc..............dddddddd',
+        'cccccccc..............dddddddd',
+        'cccccccc..............dddddddd',
+        'cccccccc..............dddddddd',
+        'cccccccc..............dddddddd',
+        'cccccccc..............dddddddd',
+        'cccccccc..............dddddddd'
+      ],
+      colors: {'a': '#fd897c', 'b': '#e38e89', 'c': '#4798c2', 'd': '#fecc48'}
     },
-    // Claude: the orange spark, two warm tones only.
+    // Claude Code: the author's own 8-bit art, on a 30x30 grid of 1px pixels.
     claude: {
-      rows: ['..oo..', 'o.oo.o', '.oyyo.', 'oooooo', '.oyyo.', 'o.oo.o'],
-      colors: { o: '#d97757', y: '#f6c992' }
+      rows: [
+        '..............................',
+        '..............................',
+        '..............................',
+        '..............................',
+        '..............................',
+        '..............................',
+        '.....aaaaaaaaaaaaaaaaaaaab....',
+        '...bbaaaaaaaaaaaaaaaaaaaabb...',
+        '...aaaaaaaaaaaaaaaaaaaaaaaa...',
+        '...aaaacdcaaaaaaaaaacdcaaaa...',
+        '...aaaaddcaaaaaaaaaaddcaaaa...',
+        '...aaaaddcaaaaaaaaaaddcaaaa...',
+        '...aaaaddcaaaaaaaaaaddcaaaa...',
+        'bbbaaaabcbaaaaaaaaaabcbaaaabbb',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaab',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaab',
+        'bbbaaaaaaaaaaaaaaaaaaaaaaaabbb',
+        '...aaaaaaaaaaaaaaaaaaaaaaaa...',
+        '...aaaaaaaaaaaaaaaaaaaaaaaa...',
+        '...aaaaaaaaaaaaaaaaaaaaaaaa...',
+        '...bbaabbaabbbbbbbaaabbaabb...',
+        '.....aa..aab......bab..aa.....',
+        '.....aa..aab......baa..aa.....',
+        '.....aa..aab......bab..aa.....',
+        '..............................',
+        '..............................',
+        '..............................',
+        '..............................',
+        '..............................',
+        '..............................'
+      ],
+      colors: {'a': '#e86d44', 'b': '#e9744c', 'c': '#ef9b7e', 'd': '#f9dcd2'}
     },
-    // Codex: a teal terminal box with a prompt mark.
+    // Codex: the author's own 8-bit art, on a 30x30 grid of 1px pixels.
     codex: {
-      rows: ['cccccc', 'cw...c', 'c.w..c', 'cw.wwc', 'c....c', 'cccccc'],
-      colors: { c: '#19a89b', w: '#ccfff9' }
+      rows: [
+        '..............................',
+        '.........aaaaaaaa.............',
+        '........aaaaaaaaaa............',
+        '........aaaaaaaaaaa...........',
+        '......aaaaaaaaaaaaaaaaaa......',
+        '......aaaaaaaaaaaaaaaaaaa.....',
+        '......aaaaaaaaaaaaaaaaaaaa....',
+        '......aaaaaaaaaaaaaaaaaaab....',
+        '....bbbbbbbbbbbbbbbbbbbbbb....',
+        '...bbbbbbbbbbbbbbbbbbbbbbbb...',
+        '..cccccbbbcccccccccccccccccc..',
+        'cccccccdddcccccccccccccccccc..',
+        'cccccccddddccccccccccccccccc..',
+        'eeeeeeebdddbceeeeeeeeeeeeeeeee',
+        'eeeeeeeeadddaeeeeeeeeeeeeeeeee',
+        'fffffffffbddafffffffffffffffff',
+        'ffffffffadddaffbbbbbbbcfffffff',
+        '..fffffbdddefffddddddddgffffgg',
+        '..fffffdddbffffddddddddgggggff',
+        '..gggggddagggggffffffffggggg..',
+        '..gggggggggggggggggggggggggg..',
+        '..gggggggggggggggggggggggggg..',
+        '....hhhhhhhhhhhhhhhhhhhhhhg...',
+        '....hhhhhhhhhhhhhhhhhhhhhh....',
+        '......hhhhhhhhhhhhhhhhhhh.....',
+        '......hhhhhhhhhhhhhhhhhhh.....',
+        '...........hhhhhhhhhh.........',
+        '............hhhhhhhh..........',
+        '.............hhhhhh...........',
+        '..............................'
+      ],
+      colors: {'a': '#947ffb', 'b': '#7d79fc', 'c': '#6e6efc', 'd': '#eef0fe', 'e': '#5b64fc', 'f': '#485afc', 'g': '#334cfc', 'h': '#1e3afc'}
+    },
+    // Orca (rare bonus): the author's own 8-bit art, on a 30x30 grid of 1px pixels.
+    orca: {
+      rows: [
+        'rrrrrrrrrrrrrrrrrrrrrrrrrrrrrr',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaabcaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaabcaacdbaaaaar',
+        'raaaaaaaaaaaaaaaadaadeedaaaaar',
+        'raaaaaaaaaaaaaaaadaabbbaaaaaar',
+        'raaaaaaaaaaaaaaacaaaaabbdeeear',
+        'raaaaaaaaaaaaaaadaaabbeeeeecar',
+        'raaaaaaaaaaaaaaadaabdeeeecbaar',
+        'raaaaaaaaaaaaaadaabdeedbbaaaar',
+        'raaaaaaaaaaaaaadabdeebbaaaaaar',
+        'raaaaaaaaaaaaacbaceebaaaaaaaar',
+        'raaaaaaaaaaaabeabdebaaaaaaaaar',
+        'raaaabbaaaabbecabecaaaaaaaaaar',
+        'raabceecbbbeedbbecaaaaaaaaaaar',
+        'raceeeeeeeeecbabebaaaaaaaaaaar',
+        'raccccccccccaaadcaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaebaaaaaaaaaaaar',
+        'raaaaaaaaaaaaabdaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaeaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaabaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'raaaaaaaaaaaaaaaaaaaaaaaaaaaar',
+        'rrrrrrrrrrrrrrrrrrrrrrrrrrrrrr'
+      ],
+      colors: {'a': '#0c0b0d', 'b': '#6b6b6c', 'c': '#a9a8a9', 'd': '#dddcdd', 'e': '#fcfbfc', 'r': '#8fc4e6'}
     }
   };
-  // 3x5 pixel font in the runner's style for the HUD and the OSN-5 effect labels.
+  // The bug is a hazard. Two frames alternate so it visibly crawls.
+  const BUG_FRAMES = [
+    [
+      '..l....l..',
+      '...l..l...',
+      '...kkkk...',
+      '.lrrkkrrl.',
+      '.rrrkkrrr.',
+      'lrkrkkrkrl',
+      '.rrrkkrrr.',
+      '.lrrkkrrl.',
+      '...rkkr...',
+      '....rr....'
+    ],
+    [
+      '...l..l...',
+      '...l..l...',
+      '..lkkkkl..',
+      '..rrkkrr..',
+      'lrrrkkrrrl',
+      '.rkrkkrkr.',
+      'lrrrkkrrrl',
+      '..rrkkrr..',
+      '...rkkr...',
+      '....rr....'
+    ]
+  ];
+  const BUG_COLORS = { r: '#ef4b57', k: '#4a0d14', l: '#ff8f98' };
+  const BUG_FRAME_MS = 280;
+  // 3x5 pixel font in the runner's style for the HUD, panels and effect labels.
   const FONT = {
     '0': ['###', '#.#', '#.#', '#.#', '###'], '1': ['.#.', '##.', '.#.', '.#.', '###'],
     '2': ['###', '..#', '###', '#..', '###'], '3': ['###', '..#', '.##', '..#', '###'],
@@ -442,39 +699,94 @@
     ' ': ['..', '..', '..', '..', '..'],
     A: ['.#.', '#.#', '###', '#.#', '#.#'], B: ['##.', '#.#', '##.', '#.#', '##.'],
     C: ['.##', '#..', '#..', '#..', '.##'], D: ['##.', '#.#', '#.#', '#.#', '##.'],
-    E: ['###', '#..', '##.', '#..', '###'], G: ['.##.', '#...', '#.##', '#..#', '.##.'],
-    H: ['#.#', '#.#', '###', '#.#', '#.#'], I: ['###', '.#.', '.#.', '.#.', '###'],
-    L: ['#..', '#..', '#..', '#..', '###'], M: ['#...#', '##.##', '#.#.#', '#...#', '#...#'],
-    N: ['#..#', '##.#', '#.##', '#..#', '#..#'], O: ['.##.', '#..#', '#..#', '#..#', '.##.'],
-    P: ['##.', '#.#', '##.', '#..', '#..'], R: ['##.', '#.#', '##.', '#.#', '#.#'],
+    E: ['###', '#..', '##.', '#..', '###'], F: ['###', '#..', '##.', '#..', '#..'],
+    G: ['.##.', '#...', '#.##', '#..#', '.##.'], H: ['#.#', '#.#', '###', '#.#', '#.#'],
+    I: ['###', '.#.', '.#.', '.#.', '###'], J: ['..#', '..#', '..#', '#.#', '.#.'],
+    K: ['#.#', '#.#', '##.', '#.#', '#.#'], L: ['#..', '#..', '#..', '#..', '###'],
+    M: ['#...#', '##.##', '#.#.#', '#...#', '#...#'], N: ['#..#', '##.#', '#.##', '#..#', '#..#'],
+    O: ['.##.', '#..#', '#..#', '#..#', '.##.'], P: ['##.', '#.#', '##.', '#..', '#..'],
+    Q: ['.##.', '#..#', '#..#', '#.##', '.###'], R: ['##.', '#.#', '##.', '#.#', '#.#'],
     S: ['.##', '#..', '.#.', '..#', '##.'], T: ['###', '.#.', '.#.', '.#.', '.#.'],
     U: ['#.#', '#.#', '#.#', '#.#', '###'], V: ['#.#', '#.#', '#.#', '#.#', '.#.'],
-    W: ['#...#', '#...#', '#.#.#', '##.##', '#...#'],
-    X: ['#.#', '#.#', '.#.', '#.#', '#.#'], '+': ['...', '.#.', '###', '.#.', '...']
+    W: ['#...#', '#...#', '#.#.#', '##.##', '#...#'], X: ['#.#', '#.#', '.#.', '#.#', '#.#'],
+    Y: ['#.#', '#.#', '.#.', '.#.', '.#.'], Z: ['###', '..#', '.#.', '#..', '###'],
+    '+': ['...', '.#.', '###', '.#.', '...'], '-': ['...', '...', '###', '...', '...'],
+    '!': ['#', '#', '#', '.', '#'], '.': ['.', '.', '.', '.', '#']
   };
-  // Light and dark are the only themes; both keep the board quiet so the snake reads clearly.
+
+  function hexToRgb(hex) {
+    const value = Number.parseInt(hex.slice(1), 16);
+    return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  }
+
+  function mixHex(from, to, amount) {
+    const a = hexToRgb(from);
+    const b = hexToRgb(to);
+    const channel = function (index) { return Math.round(a[index] + (b[index] - a[index]) * amount); };
+    return 'rgb(' + channel(0) + ', ' + channel(1) + ', ' + channel(2) + ')';
+  }
+
+  // Shallow water at the top of the board, deeper water at the bottom. Each row keeps a two tone
+  // checker so players can still read single cells.
+  function waterRows(shallowA, shallowB, deepA, deepB) {
+    const rows = [];
+    for (let y = 0; y < ROWS; y += 1) {
+      const amount = y / (ROWS - 1);
+      rows.push([mixHex(shallowA, deepA, amount), mixHex(shallowB, deepB, amount)]);
+    }
+    return rows;
+  }
+
+  // Light and dark are the only themes. Both keep the water calm so the snake reads clearly.
   const PALETTES = {
     light: {
-      boardA: '#eaf6fc',
-      boardB: '#dbeefa',
+      water: waterRows('#c5e9f8', '#b8e1f4', '#78bde3', '#6cb2da'),
+      crest: 'rgba(255, 255, 255, 0.55)',
+      sky: '#e6f6fe',
+      skyLine: '#8fd0ee',
       ink: '#10273b',
       shadow: '#ffffff',
-      scrim: 'rgba(234, 246, 252, 0.82)',
-      bodyA: '#3fae5a',
-      bodyB: '#2f8f49',
-      head: '#5fd07a'
+      scrim: 'rgba(12, 44, 70, 0.55)',
+      panel: '#f4fbff',
+      danger: '#d92d3a',
+      bodyA: '#2fa84f',
+      bodyB: '#238a3f',
+      bodyDark: '#176b2e',
+      head: '#58d27a'
     },
     dark: {
-      boardA: '#102838',
-      boardB: '#0b1f2d',
+      water: waterRows('#14405c', '#113a54', '#06182a', '#05141f'),
+      crest: 'rgba(150, 215, 255, 0.2)',
+      sky: '#071723',
+      skyLine: '#1d5f87',
       ink: '#eaf6fc',
-      shadow: '#04121c',
-      scrim: 'rgba(4, 16, 26, 0.82)',
+      shadow: '#03101a',
+      scrim: 'rgba(2, 10, 18, 0.62)',
+      panel: '#0c2233',
+      danger: '#ff6b76',
       bodyA: '#54cf74',
       bodyB: '#3aa85a',
-      head: '#7ce69a'
+      bodyDark: '#2a8546',
+      head: '#8cf0a8'
     }
   };
+  const CAUSE_TEXT = {
+    wall: 'YOU HIT THE WALL',
+    body: 'YOU BIT YOUR OWN TAIL',
+    full: 'YOU FILLED THE OCEAN'
+  };
+  // Fixed wave crests, spread over the board. They drift sideways with the frame clock.
+  const CRESTS = (function () {
+    const list = [];
+    for (let index = 0; index < 18; index += 1) {
+      list.push({
+        x: (index * 167 + (index % 3) * 41) % BOARD_W,
+        y: ((index * 7 + 3) % ROWS) * CELL + 9 + (index % 2) * 9
+      });
+    }
+    return list;
+  })();
+  const CREST_UNIT = 6;
   const TURN_STEPS = { right: 0, down: 1, left: 2, up: 3 };
 
   function rotateClockwise(rows) {
@@ -511,14 +823,23 @@
       view.ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
     }
 
+    // Each grid pixel is CELL / grid size wide: 3px for 10x10 sprites, 1px for 30x30 ones.
+    // Fine grids merge a run of equal pixels into one rectangle to keep the per-frame work small.
     function drawSprite(view, grid, colors, cellX, cellY) {
+      const unit = CELL / grid.length;
+      const merge = unit < 3;
       for (let row = 0; row < grid.length; row += 1) {
         const line = grid[row];
         for (let column = 0; column < line.length; column += 1) {
           const color = colors[line[column]];
           if (!color) continue;
+          let length = 1;
+          if (merge) {
+            while (column + length < line.length && line[column + length] === line[column]) length += 1;
+          }
           view.ctx.fillStyle = color;
-          view.ctx.fillRect(cellX * CELL + column * ART, cellY * CELL + row * ART, ART, ART);
+          view.ctx.fillRect(cellX * CELL + column * unit, cellY * CELL + row * unit, unit * length, unit);
+          column += length - 1;
         }
       }
     }
@@ -547,19 +868,44 @@
       return width - unit;
     }
 
+    function shadowed(view, text, x, y, color, scale) {
+      drawText(view, text, x + ART, y + ART, view.palette.shadow, scale);
+      drawText(view, text, x, y, color, scale);
+    }
+
     function drawBoard(view) {
+      const water = view.palette.water;
       for (let y = 0; y < ROWS; y += 1) {
         for (let x = 0; x < COLUMNS; x += 1) {
-          fillCell(view, x, y, (x + y) % 2 === 0 ? view.palette.boardA : view.palette.boardB);
+          fillCell(view, x, y, water[y][(x + y) % 2]);
         }
+      }
+      // Slow drifting wave crests: a little ripple shape, snapped to the sprite pixel grid.
+      const ctx2 = view.ctx;
+      const drift = Math.floor(Math.max(0, view.now) / 600) * CREST_UNIT;
+      const span = BOARD_W + 4 * CREST_UNIT * 2;
+      ctx2.fillStyle = view.palette.crest;
+      for (let index = 0; index < CRESTS.length; index += 1) {
+        const crest = CRESTS[index];
+        const x = ((crest.x + drift) % span) - 4 * CREST_UNIT;
+        ctx2.fillRect(x + CREST_UNIT, crest.y, 2 * CREST_UNIT, CREST_UNIT);
+        ctx2.fillRect(x, crest.y + CREST_UNIT, CREST_UNIT, CREST_UNIT);
+        ctx2.fillRect(x + 3 * CREST_UNIT, crest.y + CREST_UNIT, CREST_UNIT, CREST_UNIT);
       }
     }
 
     function drawPickup(view) {
       const pickup = view.snapshot.pickup;
       if (!pickup) return;
-      const art = PICKUP_ART[pickup.kind] || PICKUP_ART.orca;
+      const art = PICKUP_ART[pickup.kind] || PICKUP_ART.pi;
       drawSprite(view, art.rows, art.colors, pickup.x, pickup.y);
+    }
+
+    function drawBug(view) {
+      const bug = view.snapshot.bug;
+      if (!bug) return;
+      const frame = BUG_FRAMES[Math.floor(Math.max(0, view.now) / BUG_FRAME_MS) % BUG_FRAMES.length];
+      drawSprite(view, frame, BUG_COLORS, bug.x, bug.y);
     }
 
     function drawSnake(view) {
@@ -568,7 +914,8 @@
         const segment = snake[index];
         drawSprite(view, BODY_ART, {
           g: index % 2 === 0 ? view.palette.bodyA : view.palette.bodyB,
-          h: view.palette.head
+          h: view.palette.head,
+          d: view.palette.bodyDark
         }, segment.x, segment.y);
       }
       if (!snake.length) return;
@@ -576,52 +923,89 @@
       drawSprite(view, orient(HEAD_ART, view.snapshot.direction), {
         g: view.palette.head,
         w: '#f2fbff',
-        k: view.palette.ink
+        k: '#10273b'
       }, head.x, head.y);
     }
 
+    // The score strip is the water surface above the board, so no pickup or panel can hide it.
     function drawHud(view) {
+      const palette2 = view.palette;
+      view.ctx.fillStyle = palette2.sky;
+      view.ctx.fillRect(0, 0, BOARD_W, HUD_H);
+      view.ctx.fillStyle = palette2.skyLine;
+      view.ctx.fillRect(0, HUD_H - ART, BOARD_W, ART);
+      const shift = (Math.floor(Math.max(0, view.now) / 250) * ART) % (8 * ART);
+      for (let x = -8 * ART + shift; x < BOARD_W; x += 8 * ART) {
+        view.ctx.fillRect(x, HUD_H - 2 * ART, 4 * ART, ART);
+      }
       const scoreText = 'SCORE ' + String(view.snapshot.score).padStart(4, '0');
       const bestText = 'BEST ' + String(view.snapshot.best).padStart(4, '0');
-      const top = ART;
-      drawText(view, scoreText, ART + ART, top + ART, view.palette.shadow, 1);
-      drawText(view, scoreText, ART, top, view.palette.ink, 1);
-      const bestLeft = COLUMNS * CELL - ART - textWidth(bestText, 1);
-      drawText(view, bestText, bestLeft + ART, top + ART, view.palette.shadow, 1);
-      drawText(view, bestText, bestLeft, top, view.palette.ink, 1);
+      const top = 3 * ART;
+      shadowed(view, scoreText, 3 * ART, top, palette2.ink, 1);
+      shadowed(view, bestText, BOARD_W - 3 * ART - textWidth(bestText, 1), top, palette2.ink, 1);
     }
 
     function drawOverlay(view) {
       const snapshot = view.snapshot;
-      const centerX = (COLUMNS * CELL) / 2;
-      const centerY = (ROWS * CELL) / 2;
+      const palette2 = view.palette;
+      const centerX = BOARD_W / 2;
+      const centerY = BOARD_H / 2;
 
       function centered(text, y, color, scale) {
-        drawText(view, text, Math.round(centerX - textWidth(text, scale) / 2) + ART, y + ART, view.palette.shadow, scale);
-        drawText(view, text, Math.round(centerX - textWidth(text, scale) / 2), y, color, scale);
+        shadowed(view, text, Math.round(centerX - textWidth(text, scale) / 2), y, color, scale);
       }
 
-      if (snapshot.phase === 'ready') {
-        // Above the starting snake, which sits in the middle row.
-        centered('PRESS SPACE TO START', Math.round(ROWS * CELL * 0.28), view.palette.ink, 1);
-        return;
-      }
       if (snapshot.phase !== 'paused' && snapshot.phase !== 'gameover') return;
+      view.ctx.save();
+      // Overlays are laid out in board coordinates, below the score strip.
+      view.ctx.translate(0, HUD_H);
 
-      view.ctx.fillStyle = view.palette.scrim;
-      view.ctx.fillRect(0, 0, COLUMNS * CELL, ROWS * CELL);
+      view.ctx.fillStyle = palette2.scrim;
+      view.ctx.fillRect(0, 0, BOARD_W, BOARD_H);
 
       if (snapshot.phase === 'paused') {
-        centered('PAUSED', Math.round(centerY - 50), view.palette.ink, 2);
-        centered('PRESS SPACE', Math.round(centerY + 20), view.palette.ink, 1);
+        centered('PAUSED', Math.round(centerY - 50), '#ffffff', 2);
+        centered('PRESS SPACE', Math.round(centerY + 20), '#ffffff', 1);
+        view.ctx.restore();
         return;
       }
 
-      centered(snapshot.result === 'won' ? 'WELL DONE' : 'GAME OVER', 150, view.palette.ink, 2);
-      centered('SCORE ' + String(snapshot.score), 220, view.palette.ink, 1);
+      // Game over: a bordered panel with the title, why it ended, the score and how to retry.
+      const won = snapshot.result === 'won';
+      const panelWidth = 560;
+      const panelHeight = 260;
+      const left = Math.round(centerX - panelWidth / 2);
+      const top = Math.round(centerY - panelHeight / 2);
+      view.ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      view.ctx.fillRect(left + ART, top + ART, panelWidth, panelHeight);
+      view.ctx.fillStyle = palette2.ink;
+      view.ctx.fillRect(left, top, panelWidth, panelHeight);
+      view.ctx.fillStyle = palette2.panel;
+      view.ctx.fillRect(left + ART, top + ART, panelWidth - 2 * ART, panelHeight - 2 * ART);
+
+      let y = top + 3 * ART;
+      centered(won ? 'WELL DONE' : 'GAME OVER', y, won ? palette2.bodyA : palette2.danger, 2);
+      y += 10 * ART + 4 * ART;
+      const reason = CAUSE_TEXT[snapshot.cause] || '';
+      if (reason) centered(reason, y, palette2.ink, 1);
+      y += 5 * ART + 3 * ART;
+      centered('SCORE ' + String(snapshot.score).padStart(4, '0'), y, palette2.ink, 1);
+      y += 5 * ART + 2 * ART;
       if (snapshot.score === snapshot.best && snapshot.score > 0) {
-        centered('NEW BEST', 250, view.palette.head, 1);
+        centered('NEW BEST!', y, palette2.bodyA, 1);
+      } else {
+        centered('BEST ' + String(snapshot.best).padStart(4, '0'), y, palette2.ink, 1);
       }
+      centered('PRESS SPACE TO RETRY', top + panelHeight - 3 * ART - 5 * ART, palette2.ink, 1);
+      view.ctx.restore();
+    }
+
+    // Drawn on the water, under the pickup and the snake, so the first pickup is never hidden by it.
+    function drawReadyPrompt(view) {
+      if (view.snapshot.phase !== 'ready') return;
+      const text = 'PRESS SPACE TO START';
+      // Above the starting snake, which sits in the middle row.
+      shadowed(view, text, Math.round((BOARD_W - textWidth(text, 1)) / 2), Math.round(BOARD_H * 0.28), view.palette.ink, 1);
     }
 
     function runHooks(slot, view) {
@@ -646,6 +1030,7 @@
         ROWS: ROWS,
         CELL: CELL,
         ART: ART,
+        TOP: HUD_H,
         drawSprite: drawSprite,
         drawText: drawText,
         fillCell: fillCell
@@ -658,10 +1043,14 @@
         const view = makeView(snapshot, at);
         busy = false;
         view.ctx.save();
+        // The shake translates here, before the board moves below the strip.
         if (runHooks('beforeScene', view)) busy = true;
+        view.ctx.translate(0, HUD_H);
         drawBoard(view);
+        drawReadyPrompt(view);
         if (runHooks('afterBoard', view)) busy = true;
         drawPickup(view);
+        drawBug(view);
         if (runHooks('afterPickup', view)) busy = true;
         drawSnake(view);
         if (runHooks('afterSnake', view)) busy = true;
@@ -697,11 +1086,14 @@
   // ---- OSN-5 effects -----------------------------------------------------------------------
   // Copy and colours per pickup; effects only read rendered snapshots, so the core stays untouched.
   const EFFECT_KINDS = {
-    orca: { text: '+10 ORCA', primary: '#f4fbff', secondary: '#6fb7e8' },
+    pi: { text: '+10 PI', primary: '#ff8a7e', secondary: '#4798c2' },
     claude: { text: '+25 CLAUDE', primary: '#f39a4c', secondary: '#ffd86b' },
-    codex: { text: '+50 CODEX', primary: '#3cc9b5', secondary: '#3cc9b5' }
+    codex: { text: '+50 CODEX', primary: '#6b7bff', secondary: '#6b7bff' },
+    orca: { text: '+100 ORCA', primary: '#ffffff', secondary: '#8fc4e6' },
+    bug: { text: '-' + BUG_PENALTY + ' BUG', primary: '#ff5d6c', secondary: '#ffb3ba' },
+    block: { text: 'SQUASHED', primary: '#6b7bff', secondary: '#dfe3ff' }
   };
-  const SCORE_KINDS = { 10: 'orca', 25: 'claude', 50: 'codex' };
+  const SCORE_KINDS = { 10: 'pi', 25: 'claude', 50: 'codex', 100: 'orca' };
   const LABEL_MS = 800;
   const LABEL_BLINK_MS = 200;
   const BURST_MS = 450;
@@ -715,7 +1107,7 @@
     { x: -1, y: 0 }, { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 }
   ];
   const BOOST_COLOR = '#f39a4c';
-  const SHIELD_COLOR = '#3cc9b5';
+  const SHIELD_COLOR = '#6b7bff';
 
   // The renderer keeps its width helper private, so measure the same way its drawText lays out.
   function artTextWidth(text, scale) {
@@ -805,7 +1197,10 @@
       const previous = view.previous;
       const snapshot = view.snapshot;
       if (!previous || !snapshot) return;
-      const restarted = snapshot.score < previous.score
+      const bugHit = (snapshot.bugHits || 0) > (previous.bugHits || 0);
+      const bugBlocked = (snapshot.bugBlocks || 0) > (previous.bugBlocks || 0);
+      // A bug lowers the score mid-run, so a drop alone does not mean a restart.
+      const restarted = (snapshot.score < previous.score && !bugHit)
         || snapshot.phase === 'ready'
         || (previous.phase === 'gameover' && snapshot.phase === 'running');
       if (restarted) clear();
@@ -813,6 +1208,11 @@
         const kind = SCORE_KINDS[snapshot.score - previous.score];
         if (kind) addPickupEffects(view, kind);
       }
+      if (bugHit) {
+        addPickupEffects(view, 'bug');
+        if (!prefersReducedMotion()) shake = { at: view.now };
+      }
+      if (bugBlocked) addPickupEffects(view, 'block');
       if (previous.phase === 'running' && snapshot.phase === 'gameover'
         && snapshot.result === 'lost' && !prefersReducedMotion()) {
         shake = { at: view.now };
@@ -825,8 +1225,8 @@
       if (age >= SHAKE_MS) return;
       const amplitude = ART * (1 - age / SHAKE_MS);
       // Screen space, so the HUD and overlay drawn after the renderer's restore stay still.
-      view.ctx.fillStyle = view.palette.boardB;
-      view.ctx.fillRect(0, 0, view.COLS * view.CELL, view.ROWS * view.CELL);
+      view.ctx.fillStyle = view.palette.water[Math.floor(view.ROWS / 2)][0];
+      view.ctx.fillRect(0, view.TOP, view.COLS * view.CELL, view.ROWS * view.CELL);
       view.ctx.translate(
         Math.round(Math.sin(age * 0.11) * amplitude),
         Math.round(Math.cos(age * 0.17) * amplitude * 0.6)
@@ -887,7 +1287,8 @@
       view.drawText(view, badge.text, x, y, badge.color, 1);
       const width = artTextWidth(badge.text, 1);
       const barTop = y + 5 * ART + ART;
-      view.ctx.fillStyle = view.palette.scrim;
+      // The bar track is the strip's own wave colour, so it reads in both themes.
+      view.ctx.fillStyle = view.palette.skyLine;
       view.ctx.fillRect(x, barTop, width, ART);
       view.ctx.fillStyle = badge.color;
       view.ctx.fillRect(x, barTop, Math.round(width * Math.min(Math.max(badge.fraction, 0), 1)), ART);
@@ -910,7 +1311,8 @@
       for (let index = 0; index < badges.length; index += 1) total += artTextWidth(badges[index].text, 1);
       let penX = Math.round((view.COLS * view.CELL - total) / 2);
       for (let index = 0; index < badges.length; index += 1) {
-        drawBadge(view, badges[index], penX, ART);
+        // Inside the score strip: 25px of text, a 5px gap and a 5px bar, centred above the wave line.
+        drawBadge(view, badges[index], penX, 2 * ART);
         penX += artTextWidth(badges[index].text, 1) + gap;
       }
     }
@@ -925,8 +1327,9 @@
         const width = artTextWidth(kind.text, 1);
         const left = label.x * view.CELL + view.CELL / 2 - width / 2;
         const x = Math.min(Math.max(Math.round(left), 0), view.COLS * view.CELL - width);
-        const rising = label.y * view.CELL + view.CELL / 2 - (5 * ART) / 2 - view.CELL * progress;
-        const y = Math.max(Math.round(rising), 0);
+        // Labels live in screen space, below the score strip, and never rise into it.
+        const rising = view.TOP + label.y * view.CELL + view.CELL / 2 - (5 * ART) / 2 - view.CELL * progress;
+        const y = Math.max(Math.round(rising), view.TOP);
         view.ctx.save();
         view.ctx.globalAlpha = Math.min(1, (1 - progress) * 2);
         view.drawText(view, kind.text, x + ART, y + ART, view.palette.shadow, 1);

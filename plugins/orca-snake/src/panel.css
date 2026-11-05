@@ -9,7 +9,7 @@ html, body { height: 100%; }
 body { margin: 0; background: var(--page); }
 /* Just the game, centred on the panel like the offline dino page. */
 main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px; }
-.playfield { width: 100%; aspect-ratio: 3 / 2; touch-action: none; }
+.playfield { width: 100%; aspect-ratio: 4 / 3; touch-action: none; }
 canvas { display: block; width: 100%; outline: none; touch-action: none; cursor: pointer; image-rendering: crisp-edges; image-rendering: pixelated; }
 canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .status { margin: 0; font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; color: var(--ink); text-align: center; }

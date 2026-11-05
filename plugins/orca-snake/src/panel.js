@@ -11,17 +11,23 @@
     ArrowRight: 'right', KeyD: 'right'
   }
   // Some webviews and synthesized key events provide key without a physical code.
-  const KEY_CODES = { ' ': 'Space', Spacebar: 'Space', p: 'KeyP', P: 'KeyP' }
+  const KEY_CODES = {
+    ' ': 'Space', Spacebar: 'Space', p: 'KeyP', P: 'KeyP',
+    w: 'KeyW', W: 'KeyW', a: 'KeyA', A: 'KeyA', s: 'KeyS', S: 'KeyS', d: 'KeyD', D: 'KeyD',
+    Up: 'ArrowUp', Down: 'ArrowDown', Left: 'ArrowLeft', Right: 'ArrowRight'
+  }
 
   let phase = 'ready'
   let score = 0
   let best = 0
   let outcome = null
+  let cause = null
   let bestBeforeRun = 0
 
   function updateStatus() {
     if (phase === 'gameover') {
-      const head = outcome === 'won' ? 'Board full, you win.' : 'Game over.'
+      const reasons = { wall: ' You hit the wall.', body: ' You bit your own tail.' }
+      const head = outcome === 'won' ? 'Board full, you win.' : 'Game over.' + (reasons[cause] || '')
       const record = score > bestBeforeRun ? ' New best!' : ''
       announcement.textContent = `${head} Score ${score}.${record} Press Space to play again.`
       return
@@ -44,6 +50,7 @@
       score = snapshot.score
       best = snapshot.best
       outcome = snapshot.result
+      cause = snapshot.cause
       if (next === 'running' && snapshot.score === 0) bestBeforeRun = snapshot.best
       updateStatus()
     },

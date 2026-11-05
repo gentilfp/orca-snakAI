@@ -11,6 +11,7 @@ const COLS = 24;
 const ROWS = 16;
 const CELL = 30;
 const ART = 5;
+const TOP = 60;
 const FONT_ROWS = 5;
 
 function makeContext() {
@@ -39,7 +40,7 @@ function makeCanvas() {
   const { ctx, calls } = makeContext();
   const canvas = {
     width: COLS * CELL,
-    height: ROWS * CELL,
+    height: TOP + ROWS * CELL,
     focus() {},
     getContext() {
       return ctx;
@@ -54,7 +55,10 @@ function snap(overrides = {}) {
     snake: [{ x: 6, y: 8 }, { x: 5, y: 8 }, { x: 4, y: 8 }],
     direction: 'right',
     queuedDirections: [],
-    pickup: { x: 3, y: 4, kind: 'orca', expiresAt: 10000 },
+    pickup: { x: 3, y: 4, kind: 'pi', expiresAt: 10000 },
+    bug: null,
+    bugHits: 0,
+    bugBlocks: 0,
     score: 0,
     best: 0,
     growthPending: 0,
@@ -73,8 +77,9 @@ function makeView(ctx, calls, now, snapshot, previous) {
     now,
     theme: 'light',
     palette: {
-      boardA: '#eaf6fc',
-      boardB: '#dbeefa',
+      water: Array.from({ length: ROWS }, () => ['#c5e9f8', '#b8e1f4']),
+      sky: '#e6f6fe',
+      skyLine: '#8fd0ee',
       ink: '#10273b',
       shadow: '#ffffff',
       scrim: 'rgba(234, 246, 252, 0.82)',
@@ -86,6 +91,7 @@ function makeView(ctx, calls, now, snapshot, previous) {
     ROWS,
     CELL,
     ART,
+    TOP,
     drawSprite() {},
     fillCell() {},
     drawText(view, text, x, y, color, scale) {
@@ -130,9 +136,10 @@ const translates = calls => calls.filter(call => call.type === 'translate');
 
 test('eating each pickup shows its label, a burst and a one-cell flash', () => {
   const cases = [
-    ['orca', 10, '+10 ORCA', '#f4fbff'],
+    ['pi', 10, '+10 PI', '#ff8a7e'],
     ['claude', 25, '+25 CLAUDE', '#f39a4c'],
-    ['codex', 50, '+50 CODEX', '#3cc9b5']
+    ['codex', 50, '+50 CODEX', '#6b7bff'],
+    ['orca', 100, '+100 ORCA', '#ffffff']
   ];
   for (const [kind, points, label, color] of cases) {
     const { ctx, calls, renderer } = setup();
@@ -164,7 +171,7 @@ test('effects stop at their lifetimes and an idle pair draws nothing', () => {
   calls.length = 0;
   const alive = renderPair({ renderer, ctx, calls, now: 749, previous: next, snapshot: next });
   assert.equal(alive.busy, true, 'the label is still alive before 800 ms');
-  assert.ok(texts(calls).some(call => call.text === '+10 ORCA'));
+  assert.ok(texts(calls).some(call => call.text === '+10 PI'));
 
   calls.length = 0;
   const blinking = renderPair({ renderer, ctx, calls, now: 899, previous: next, snapshot: next });
@@ -310,7 +317,7 @@ test('boost and shield badges show only while running and ahead of the clock', (
     snapshot: snap({ shieldUntil: 2500 })
   });
   assert.deepEqual(rects(shield.calls)
-    .filter(call => call.color === '#3cc9b5' && call.height === ART && call.width > CELL)
+    .filter(call => call.color === '#6b7bff' && call.height === ART && call.width > CELL)
     .map(call => call.width), [58]);
 
   const both = setup();
@@ -347,7 +354,7 @@ test('the shield outlines the head only while shielded and running', () => {
     renderer: outline.renderer, ctx: outline.ctx, calls: outline.calls, now: 0, previous: null,
     snapshot: snap({ shieldUntil: 5000 })
   });
-  const edges = rects(outline.calls).filter(call => call.color === '#3cc9b5'
+  const edges = rects(outline.calls).filter(call => call.color === '#6b7bff'
     && ((call.width === CELL && call.height === ART) || (call.width === ART && call.height === CELL)));
   assert.equal(edges.length, 4, 'four thin edges outline the head');
   const head = snap().snake[0];
@@ -359,14 +366,14 @@ test('the shield outlines the head only while shielded and running', () => {
     renderer: plainBoard.renderer, ctx: plainBoard.ctx, calls: plainBoard.calls, now: 0, previous: null,
     snapshot: snap({ shieldUntil: 0 })
   });
-  assert.equal(rects(plainBoard.calls).filter(call => call.color === '#3cc9b5').length, 0, 'no outline without a shield');
+  assert.equal(rects(plainBoard.calls).filter(call => call.color === '#6b7bff').length, 0, 'no outline without a shield');
 
   const blinking = setup();
   renderPair({
     renderer: blinking.renderer, ctx: blinking.ctx, calls: blinking.calls, now: 150, previous: null,
     snapshot: snap({ shieldUntil: 1000 })
   });
-  assert.equal(rects(blinking.calls).filter(call => call.color === '#3cc9b5'
+  assert.equal(rects(blinking.calls).filter(call => call.color === '#6b7bff'
     && ((call.width === CELL && call.height === ART) || (call.width === ART && call.height === CELL))).length,
   0, 'the outline blinks in the last second');
 });
@@ -383,7 +390,7 @@ test('the real renderer stays busy until the effects finish', () => {
   const eaten = snap({ score: 10 });
   renderer.render(eaten, 16);
   assert.equal(renderer.isBusy(), true, 'a score rise animates');
-  assert.ok(calls.some(call => call.type === 'rect' && call.color === '#f4fbff'), 'the label is painted');
+  assert.ok(calls.some(call => call.type === 'rect' && call.color === '#ff8a7e'), 'the label is painted');
 
   renderer.render(eaten, 800);
   assert.equal(renderer.isBusy(), true, 'still animating before 800 ms');
@@ -403,4 +410,65 @@ test('the real renderer stays busy until the effects finish', () => {
 
 test('the installer rejects a missing renderer', () => {
   assert.throws(() => platform.installOrcaSnakeEffects(null), /renderer/);
+});
+
+test('a bug hit shows a red label, shakes the board and is not mistaken for a restart', () => {
+  const { ctx, calls, renderer } = setup();
+  // The score fell by 20 and the hit counter rose, so this is a bug, not a new run.
+  const previous = snap({ score: 120 });
+  const next = snap({ score: 100, bugHits: 1 });
+  const { busy } = renderPair({ renderer, ctx, calls, now: 100, previous, snapshot: next });
+  assert.equal(busy, true);
+  assert.ok(texts(calls).some(call => call.text === '-20 BUG' && call.color === '#ff5d6c'));
+  assert.equal(translates(calls).length, 1, 'the board shakes');
+  assert.equal(rects(calls).filter(call => call.width === ART && call.height === ART).length, 8, 'eight particles');
+
+  // A bug at score 0 changes no points but is still seen through the counter.
+  const zero = setup();
+  renderPair({
+    renderer: zero.renderer, ctx: zero.ctx, calls: zero.calls, now: 0,
+    previous: snap({ score: 0 }), snapshot: snap({ score: 0, bugHits: 1 })
+  });
+  assert.ok(texts(zero.calls).some(call => call.text === '-20 BUG'));
+
+  // The same snapshot again adds nothing.
+  calls.length = 0;
+  renderPair({ renderer, ctx, calls, now: 120, previous: next, snapshot: next });
+  assert.equal(texts(calls).filter(call => call.text === '-20 BUG').length, 2, 'one label, drawn with its shadow');
+});
+
+test('a squashed bug shows its own label without a shake, and reduced motion drops the bug shake', () => {
+  const { ctx, calls, renderer } = setup();
+  renderPair({
+    renderer, ctx, calls, now: 100, previous: snap({ score: 50 }), snapshot: snap({ score: 50, bugBlocks: 1 })
+  });
+  assert.ok(texts(calls).some(call => call.text === 'SQUASHED' && call.color === '#6b7bff'));
+  assert.equal(translates(calls).length, 0, 'a squashed bug does not shake');
+
+  platform.matchMedia = query => ({ matches: query === '(prefers-reduced-motion: reduce)' });
+  try {
+    const calm = setup();
+    renderPair({
+      renderer: calm.renderer, ctx: calm.ctx, calls: calm.calls, now: 100,
+      previous: snap({ score: 50 }), snapshot: snap({ score: 30, bugHits: 1 })
+    });
+    assert.equal(translates(calm.calls).length, 0);
+    assert.ok(texts(calm.calls).some(call => call.text === '-20 BUG'), 'the label still shows');
+  } finally {
+    delete platform.matchMedia;
+  }
+});
+
+test('labels never rise into the score strip', () => {
+  const { ctx, calls, renderer } = setup();
+  // The head sits in the top board row, where the label would otherwise climb into the strip.
+  const top = [{ x: 3, y: 0 }, { x: 2, y: 0 }, { x: 1, y: 0 }];
+  renderPair({
+    renderer, ctx, calls, now: 0, previous: snap({ snake: top }), snapshot: snap({ snake: top, score: 10 })
+  });
+  calls.length = 0;
+  renderPair({ renderer, ctx, calls, now: 400, previous: snap({ snake: top, score: 10 }), snapshot: snap({ snake: top, score: 10 }) });
+  const labels = texts(calls).filter(call => call.text === '+10 PI');
+  assert.ok(labels.length > 0);
+  assert.ok(labels.every(call => call.y >= TOP), 'the label stays below the strip');
 });

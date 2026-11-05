@@ -183,6 +183,16 @@ test('each arrow and WASD key queues its direction', () => {
   assert.equal(harness.game.calls.length, Object.keys(mapping).length);
 });
 
+test('direction keys without a physical code still steer, in either letter case', () => {
+  const harness = createHarness();
+  harness.game.state.phase = 'running';
+  const keys = { w: 'up', W: 'up', s: 'down', S: 'down', a: 'left', A: 'left', d: 'right', D: 'right', Up: 'up', Left: 'left' };
+  for (const [key, direction] of Object.entries(keys)) {
+    harness.document.fire('keydown', harness.key({ code: undefined, key }));
+    assert.equal(harness.game.calls.at(-1), `queue:${direction}`, `${key} queues ${direction}`);
+  }
+});
+
 test('a direction key on a ready board starts before queuing', () => {
   const harness = createHarness();
   harness.game.state.phase = 'ready';
@@ -346,6 +356,15 @@ test('status text describes every phase and the new best', () => {
   modest.game.options.onStateChange('running', { score: 0, best: 50, result: null });
   modest.game.options.onStateChange('gameover', { score: 50, best: 50, result: 'lost' });
   assert.equal(modest.announcement.textContent, 'Game over. Score 50. Press Space to play again.');
+
+  const walled = createHarness();
+  walled.game.options.onStateChange('running', { score: 0, best: 0, result: null });
+  walled.game.options.onStateChange('gameover', { score: 0, best: 0, result: 'lost', cause: 'wall' });
+  assert.equal(walled.announcement.textContent, 'Game over. You hit the wall. Score 0. Press Space to play again.');
+  const tangled = createHarness();
+  tangled.game.options.onStateChange('running', { score: 0, best: 0, result: null });
+  tangled.game.options.onStateChange('gameover', { score: 0, best: 0, result: 'lost', cause: 'body' });
+  assert.equal(tangled.announcement.textContent, 'Game over. You bit your own tail. Score 0. Press Space to play again.');
 
   const won = createHarness();
   won.game.options.onStateChange('running', { score: 0, best: 0, result: null });

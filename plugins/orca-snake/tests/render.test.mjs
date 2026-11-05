@@ -11,27 +11,40 @@ const COLS = 24;
 const ROWS = 16;
 const CELL = 30;
 const ART = 5;
+const HUD_H = 60;
+// Board sprites are 10x10 grids of 3px pixels.
+const SPRITE_PX = 3;
 // Sandbox objects carry the VM realm's prototypes, so compare plain copies.
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function makeCanvas() {
   const calls = [];
+  // The fake applies translate, so recorded rectangles are in canvas pixels.
+  const stack = [];
+  let offsetX = 0;
+  let offsetY = 0;
   const ctx = {
     imageSmoothingEnabled: true,
     fillStyle: '#000000',
     fillRect(x, y, width, height) {
-      calls.push({ x, y, width, height, color: this.fillStyle });
+      calls.push({ x: x + offsetX, y: y + offsetY, width, height, color: this.fillStyle });
     },
     save() {
+      stack.push([offsetX, offsetY]);
       calls.push({ type: 'save' });
     },
     restore() {
+      [offsetX, offsetY] = stack.pop();
       calls.push({ type: 'restore' });
+    },
+    translate(x, y) {
+      offsetX += x;
+      offsetY += y;
     }
   };
   const canvas = {
     width: 720,
-    height: 480,
+    height: 540,
     focus() {},
     getContext() {
       return ctx;
@@ -46,7 +59,11 @@ function snap(overrides = {}) {
     snake: [{ x: 6, y: 8 }, { x: 5, y: 8 }, { x: 4, y: 8 }],
     direction: 'right',
     queuedDirections: [],
-    pickup: { x: 3, y: 4, kind: 'orca', expiresAt: 10000 },
+    pickup: { x: 3, y: 4, kind: 'pi', expiresAt: 10000 },
+    bug: null,
+    bugHits: 0,
+    bugBlocks: 0,
+    cause: null,
     score: 0,
     best: 0,
     growthPending: 0,
@@ -64,13 +81,21 @@ function makeRenderer(theme = 'light') {
   return { renderer, canvas, calls };
 }
 
+// The pickups are 30x30 art with 1px pixels (merged into runs), so they are the 1px-high rectangles.
+function pickupCallsIn(calls, cell) {
+  const left = cell.x * CELL;
+  const top = HUD_H + cell.y * CELL;
+  return calls.filter(call => call.height === 1 && call.width <= CELL
+    && call.x >= left && call.x < left + CELL && call.y >= top && call.y < top + CELL);
+}
+
 function artCallsIn(calls, cell) {
   const left = cell.x * CELL;
-  const top = cell.y * CELL;
-  return calls.filter(call => call.width === ART && call.height === ART
+  const top = HUD_H + cell.y * CELL;
+  return calls.filter(call => call.width === SPRITE_PX && call.height === SPRITE_PX
     && call.x >= left && call.x < left + CELL
     && call.y >= top && call.y < top + CELL
-    && (call.x - left) % ART === 0 && (call.y - top) % ART === 0);
+    && (call.x - left) % SPRITE_PX === 0 && (call.y - top) % SPRITE_PX === 0);
 }
 
 test('the board is a 24x16 checker of 30px cells', () => {
@@ -78,7 +103,7 @@ test('the board is a 24x16 checker of 30px cells', () => {
   renderer.render(snap(), 0);
   const board = calls.filter(call => call.width === CELL && call.height === CELL);
   assert.equal(board.length, COLS * ROWS);
-  const at = (x, y) => board.find(call => call.x === x * CELL && call.y === y * CELL);
+  const at = (x, y) => board.find(call => call.x === x * CELL && call.y === HUD_H + y * CELL);
   assert.ok(at(0, 0), 'first cell is drawn');
   assert.ok(at(COLS - 1, ROWS - 1), 'last cell is drawn');
   assert.notEqual(at(0, 0).color, at(1, 0).color);
@@ -92,7 +117,7 @@ test('snake segments and the pickup land on their snapshot cells', () => {
   for (const segment of state.snake) {
     assert.ok(artCallsIn(calls, segment).length > 0, `segment at ${segment.x},${segment.y} draws art`);
   }
-  assert.ok(artCallsIn(calls, state.pickup).length > 0, 'the pickup draws art');
+  assert.ok(pickupCallsIn(calls, state.pickup).length > 0, 'the pickup draws art');
 });
 
 test('the head art is rotated for each direction', () => {
@@ -101,7 +126,7 @@ test('the head art is rotated for each direction', () => {
     const state = snap({ direction });
     renderer.render(state, 0);
     return artCallsIn(calls, state.snake[0])
-      .map(call => `${call.x - state.snake[0].x * CELL},${call.y - state.snake[0].y * CELL},${call.color}`)
+      .map(call => `${call.x - state.snake[0].x * CELL},${call.y - HUD_H - state.snake[0].y * CELL},${call.color}`)
       .join('|');
   };
   const right = headArt('right');
@@ -112,7 +137,7 @@ test('the head art is rotated for each direction', () => {
 });
 
 test('a null pickup draws no pickup art', () => {
-  const pickupColors = new Set(['#10263a', '#f4fbff', '#d97757', '#f6c992', '#19a89b', '#ccfff9']);
+  const pickupColors = new Set(['#fd897c', '#4798c2', '#fecc48', '#e86d44', '#f9dcd2', '#947ffb', '#1e3afc', '#8fc4e6']);
   const withPickup = makeRenderer();
   withPickup.renderer.render(snap(), 0);
   assert.ok(withPickup.calls.some(call => pickupColors.has(call.color)), 'a pickup paints its colours');
@@ -145,11 +170,12 @@ test('hooks run in draw order with the view fields OSN-5 needs', () => {
   assert.equal(view.ROWS, ROWS);
   assert.equal(view.CELL, CELL);
   assert.equal(view.ART, ART);
+  assert.equal(view.TOP, HUD_H);
   assert.equal(typeof view.drawSprite, 'function');
   assert.equal(typeof view.drawText, 'function');
   assert.equal(typeof view.fillCell, 'function');
   assert.deepEqual(Object.keys(view.palette).sort(),
-    ['boardA', 'boardB', 'bodyA', 'bodyB', 'head', 'ink', 'scrim', 'shadow']);
+    ['bodyA', 'bodyB', 'bodyDark', 'crest', 'danger', 'head', 'ink', 'panel', 'scrim', 'shadow', 'sky', 'skyLine', 'water']);
   assert.equal(renderer.isBusy(), false);
 
   const second = snap({ score: 10 });
@@ -334,4 +360,122 @@ test('without a core the controller builds one and reads the stored best', () =>
   assert.equal(state.phase, 'ready');
   assert.equal(state.best, 42);
   assert.doesNotThrow(() => game.destroy());
+});
+
+// ---- Score strip, ocean, bug and game over panel ------------------------------------------------
+
+test('the score strip sits above the board and nothing on the board reaches it', () => {
+  // A pickup in the top-left cell is the worst case for the old in-board HUD.
+  const { renderer, calls } = makeRenderer();
+  const state = snap({ pickup: { x: 0, y: 0, kind: 'claude', expiresAt: 10000 }, score: 120, best: 300 });
+  renderer.render(state, 0);
+  const rects = calls.filter(call => call.width !== undefined);
+
+  const strip = rects.find(call => call.x === 0 && call.y === 0 && call.width === 720 && call.height === HUD_H);
+  assert.ok(strip, 'the strip is a full-width block at the top');
+  assert.ok(rects.some(call => call.width === ART && call.height === ART && call.y + call.height <= HUD_H),
+    'score and best are drawn as text inside the strip');
+
+  const boardArt = rects.filter(call => call.width === SPRITE_PX || call.width === CELL || call.height === 1);
+  assert.ok(boardArt.length > 0);
+  assert.ok(boardArt.every(call => call.y >= HUD_H), 'board art starts below the strip');
+  assert.ok(pickupCallsIn(calls, { x: 0, y: 0 }).length > 0, 'the pickup in the top row is still drawn');
+});
+
+test('the board is water: it gets deeper toward the bottom and drifts with the clock', () => {
+  const { renderer, calls } = makeRenderer();
+  renderer.render(snap({ pickup: null, snake: [] }), 0);
+  const cells = calls.filter(call => call.width === CELL && call.height === CELL);
+  const top = cells.find(call => call.x === 0 && call.y === HUD_H);
+  const bottom = cells.find(call => call.x === 0 && call.y === HUD_H + (ROWS - 1) * CELL);
+  assert.notEqual(top.color, bottom.color, 'rows change colour from shallow to deep');
+
+  const crestsAt = at => {
+    const run = makeRenderer();
+    run.renderer.render(snap({ pickup: null, snake: [] }), at);
+    return run.calls.filter(call => call.width === 6 && call.height === 6).map(call => call.x).join(',');
+  };
+  assert.ok(crestsAt(0).length > 0, 'wave crests are drawn');
+  assert.equal(crestsAt(0), crestsAt(599), 'a crest holds still within a drift step');
+  assert.notEqual(crestsAt(0), crestsAt(600), 'a crest moves after a drift step');
+});
+
+test('the bug is drawn on its cell, alternates two frames and is absent without one', () => {
+  const bugColors = new Set(['#ef4b57', '#4a0d14', '#ff8f98']);
+  const bugAt = at => {
+    const { renderer, calls } = makeRenderer();
+    renderer.render(snap({ pickup: null, bug: { x: 15, y: 9, expiresAt: 9999 } }), at);
+    return artCallsIn(calls, { x: 15, y: 9 }).filter(call => bugColors.has(call.color))
+      .map(call => `${call.x},${call.y},${call.color}`).join('|');
+  };
+  assert.ok(bugAt(0).length > 0, 'the bug paints its colours');
+  assert.equal(bugAt(0), bugAt(279));
+  assert.notEqual(bugAt(0), bugAt(280), 'the legs change on the next frame');
+  assert.equal(bugAt(0), bugAt(560), 'and change back');
+
+  const none = makeRenderer();
+  none.renderer.render(snap({ pickup: null, bug: null }), 0);
+  assert.equal(none.calls.filter(call => bugColors.has(call.color)).length, 0);
+  const legacy = makeRenderer();
+  const withoutBug = snap({ pickup: null });
+  delete withoutBug.bug;
+  assert.doesNotThrow(() => legacy.renderer.render(withoutBug, 0), 'snapshots without a bug field still render');
+});
+
+test('game over draws a framed panel inside the board with a line for each cause', () => {
+  const panelFor = (theme, overrides) => {
+    const { renderer, calls } = makeRenderer(theme);
+    let panel = null;
+    renderer.addHook('beforeScene', view => {
+      panel = view.palette.panel;
+      return false;
+    });
+    renderer.render(snap({ phase: 'gameover', result: 'lost', cause: 'wall', score: 50, best: 50, ...overrides }), 0);
+    return { calls, panel };
+  };
+  for (const theme of ['light', 'dark']) {
+    const { calls, panel } = panelFor(theme, {});
+    const fill = calls.find(call => call.color === panel && call.width > 400);
+    assert.ok(fill, `${theme} game over has a panel fill`);
+    assert.ok(fill.y >= HUD_H && fill.y + fill.height <= HUD_H + ROWS * CELL, 'the panel stays below the strip');
+    assert.ok(fill.x > 0 && fill.x + fill.width < COLS * CELL, 'the panel stays inside the board');
+  }
+  const signature = overrides => panelFor('light', overrides).calls
+    .filter(call => call.width === ART && call.height === ART).map(call => `${call.x},${call.y},${call.color}`).join('|');
+  assert.notEqual(signature({ cause: 'wall' }), signature({ cause: 'body' }), 'each cause has its own line');
+  assert.notEqual(signature({ result: 'lost' }), signature({ result: 'won', cause: 'full' }), 'a win reads differently');
+  assert.notEqual(signature({ score: 50, best: 50 }), signature({ score: 50, best: 90 }), 'new best differs from best');
+  assert.notEqual(signature({ cause: 'wall' }), signature({ cause: null }), 'an unknown cause just omits the line');
+});
+
+test('the start prompt is drawn under the pickup so it never hides it', () => {
+  const run = phase => {
+    const { renderer, calls } = makeRenderer();
+    // A pickup right where the prompt is drawn.
+    renderer.render(snap({ phase, pickup: { x: 12, y: 4, kind: 'codex', expiresAt: 10000 } }), 0);
+    return calls;
+  };
+  const ready = run('ready');
+  const ink = ready.filter(call => call.color === '#10273b' && call.width === ART && call.y >= HUD_H);
+  assert.ok(ink.length > 0, 'a ready board shows the prompt');
+  assert.equal(run('running').filter(call => call.color === '#10273b' && call.width === ART && call.y > HUD_H).length, 0,
+    'a running board has no prompt');
+  const lastPrompt = ready.lastIndexOf(ink[ink.length - 1]);
+  const firstSprite = ready.findIndex(call => call.height === 1 && call.color === '#1e3afc');
+  assert.ok(firstSprite > lastPrompt, 'the pickup is painted after the prompt');
+});
+
+test('the pickup sprites are the author art: four kinds, each with its own colours', () => {
+  const colorsOf = kind => {
+    const { renderer, calls } = makeRenderer();
+    renderer.render(snap({ pickup: { x: 10, y: 6, kind, expiresAt: 10000 } }), 0);
+    return [...new Set(pickupCallsIn(calls, { x: 10, y: 6 }).map(call => call.color))].sort().join();
+  };
+  const seen = ['pi', 'claude', 'codex', 'orca'].map(colorsOf);
+  assert.ok(seen.every(colors => colors.length > 0), 'every kind draws');
+  assert.equal(new Set(seen).size, 4, 'no two kinds share a palette');
+  // 1px sprites are merged into runs: far fewer rectangles than the 900 pixels of a full 30x30 grid.
+  const { renderer, calls } = makeRenderer();
+  renderer.render(snap({ pickup: { x: 10, y: 6, kind: 'orca', expiresAt: 10000 } }), 0);
+  assert.ok(pickupCallsIn(calls, { x: 10, y: 6 }).length < 300);
 });

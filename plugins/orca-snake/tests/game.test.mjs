@@ -37,7 +37,7 @@ function setup({ clock = createClock(), initialState, randomValues = [], fallbac
 }
 
 const START = [{ x: 6, y: 8 }, { x: 5, y: 8 }, { x: 4, y: 8 }];
-const OPEN_PICKUP = { x: 22, y: 0, kind: 'orca', expiresAt: 10000 };
+const OPEN_PICKUP = { x: 22, y: 0, kind: 'pi', expiresAt: 10000 };
 
 test('a ready board has three mid-left segments and one pickup on a free cell', () => {
   const { core } = setup({ randomValues: [0, 0] });
@@ -52,7 +52,7 @@ test('a ready board has three mid-left segments and one pickup on a free cell', 
   assert.equal(state.boostUntil, 0);
   assert.equal(state.shieldUntil, 0);
   assert.equal(state.result, null);
-  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'orca', expiresAt: 8000 });
+  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'pi', expiresAt: 8000 });
   assert.ok(!state.snake.some(point => point.x === state.pickup.x && point.y === state.pickup.y));
 
   // getState hands out copies, never the mutable internals.
@@ -62,7 +62,7 @@ test('a ready board has three mid-left segments and one pickup on a free cell', 
   const fresh = core.getState();
   assert.equal(fresh.snake[0].x, 6);
   assert.deepEqual(plain(fresh.queuedDirections), []);
-  assert.equal(fresh.pickup.kind, 'orca');
+  assert.equal(fresh.pickup.kind, 'pi');
 });
 
 test('start moves one cell per step; ready and gameover boards do not advance', () => {
@@ -140,7 +140,7 @@ test('pause freezes play and resume shifts pickup and effect deadlines', () => {
       phase: 'running',
       snake: START,
       direction: 'right',
-      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 10000 },
+      pickup: { x: 0, y: 0, kind: 'pi', expiresAt: 10000 },
       boostUntil: 3000,
       shieldUntil: 5000
     }
@@ -320,9 +320,10 @@ test('a shield forgives one collision by dropping the tail, then is consumed', (
 
 test('each pickup awards its points, growth and effect', () => {
   const rewards = [
-    { kind: 'orca', points: 10, growth: 1, boost: 0, shield: 0 },
+    { kind: 'pi', points: 10, growth: 1, boost: 0, shield: 0 },
     { kind: 'claude', points: 25, growth: 2, boost: 3000, shield: 0 },
-    { kind: 'codex', points: 50, growth: 3, boost: 0, shield: 5000 }
+    { kind: 'codex', points: 50, growth: 3, boost: 0, shield: 5000 },
+    { kind: 'orca', points: 100, growth: 1, boost: 0, shield: 0 }
   ];
   for (const reward of rewards) {
     const { core, saved } = setup({
@@ -342,7 +343,7 @@ test('each pickup awards its points, growth and effect', () => {
     assert.equal(collected.growthPending, reward.growth - 1);
     assert.equal(collected.boostUntil, reward.boost);
     assert.equal(collected.shieldUntil, reward.shield);
-    assert.equal(collected.pickup.kind, 'orca');
+    assert.equal(collected.pickup.kind, 'pi');
     assert.equal(collected.pickup.expiresAt, 8000);
     assert.ok(!collected.snake.some(point => point.x === collected.pickup.x && point.y === collected.pickup.y));
     assert.equal(new Set(collected.snake.map(point => `${point.x},${point.y}`)).size, collected.snake.length);
@@ -360,8 +361,8 @@ test('each pickup awards its points, growth and effect', () => {
 
 test('spawn uses the injected random stream, clamps bad values and stays off the snake', () => {
   const weights = [
-    [0.6999, 'orca'], [0.7, 'claude'], [0.94, 'claude'],
-    [0.95, 'codex'], [1, 'codex'], [-1, 'orca'], [Number.NaN, 'orca']
+    [0, 'pi'], [0.32, 'pi'], [0.34, 'claude'], [0.65, 'claude'], [0.66, 'codex'],
+    [0.9799, 'codex'], [0.98, 'orca'], [1, 'orca'], [-1, 'pi'], [Number.NaN, 'pi']
   ];
   for (const [roll, kind] of weights) {
     const state = setup({ randomValues: [0.25, roll] }).core.getState();
@@ -375,7 +376,7 @@ test('spawn uses the injected random stream, clamps bad values and stays off the
   assert.deepEqual(plain([first.pickup.x, first.pickup.y]), [0, 0]);
   const nanCell = setup({ randomValues: [Number.NaN, 0] }).core.getState();
   assert.deepEqual(plain([nanCell.pickup.x, nanCell.pickup.y]), [0, 0]);
-  const populated = setup({ randomValues: [0.5, 0.8] }).core.getState();
+  const populated = setup({ randomValues: [0.5, 0.5] }).core.getState();
   assert.equal(populated.pickup.kind, 'claude');
   assert.ok(!populated.snake.some(point => point.x === populated.pickup.x && point.y === populated.pickup.y));
 });
@@ -406,7 +407,7 @@ test('pickups expire at their rolled deadline and a respawn rolls again', () => 
       phase: 'running',
       snake: START,
       direction: 'right',
-      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 8000 }
+      pickup: { x: 0, y: 0, kind: 'pi', expiresAt: 8000 }
     }
   });
   clock.set(7999);
@@ -424,7 +425,7 @@ test('pickups expire at their rolled deadline and a respawn rolls again', () => 
       phase: 'running',
       snake: START,
       direction: 'right',
-      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 12000 }
+      pickup: { x: 0, y: 0, kind: 'pi', expiresAt: 12000 }
     }
   });
   longestClock.set(11999);
@@ -443,13 +444,13 @@ test('pickups expire at their rolled deadline and a respawn rolls again', () => 
       phase: 'running',
       snake: START,
       direction: 'right',
-      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 8000 }
+      pickup: { x: 0, y: 0, kind: 'pi', expiresAt: 8000 }
     }
   });
   rerollClock.set(8000);
   const fresh = rerolled.core.step();
   assert.equal(fresh.pickup.expiresAt, 20000, 'a respawn rolls a fresh 12 second lifetime');
-  assert.equal(fresh.pickup.kind, 'orca');
+  assert.equal(fresh.pickup.kind, 'pi');
 });
 
 test('filling the board with the last pickup wins the game', () => {
@@ -467,7 +468,7 @@ test('filling the board with the last pickup wins the game', () => {
       phase: 'running',
       snake: body,
       direction: 'left',
-      pickup: { x: empty.x, y: empty.y, kind: 'orca', expiresAt: 10000 }
+      pickup: { x: empty.x, y: empty.y, kind: 'pi', expiresAt: 10000 }
     }
   });
   const won = core.step();
@@ -544,7 +545,7 @@ test('restart clears the run while keeping the loaded best score', () => {
   assert.equal(state.boostUntil, 0);
   assert.equal(state.shieldUntil, 0);
   assert.equal(state.result, null);
-  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'orca', expiresAt: 8000 });
+  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'pi', expiresAt: 8000 });
   assert.deepEqual(saved, [92]);
 });
 
@@ -614,4 +615,274 @@ test('best store uses orca-snake-best and falls back safely when storage fails',
 
   const positional = platform.createOrcaSnakeBestStore(storage);
   assert.equal(positional.loadBest(), 12);
+});
+
+// ---- Bug hazard and game over cause ------------------------------------------------------------
+
+const LONG_SNAKE = [
+  { x: 10, y: 5 }, { x: 9, y: 5 }, { x: 8, y: 5 }, { x: 7, y: 5 },
+  { x: 6, y: 5 }, { x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }
+];
+
+function bugBoard(overrides = {}) {
+  return setup({
+    initialState: {
+      phase: 'running',
+      snake: LONG_SNAKE,
+      direction: 'right',
+      pickup: OPEN_PICKUP,
+      bug: { x: 11, y: 5, expiresAt: 10000 },
+      score: 50,
+      growthPending: 0,
+      ...overrides
+    }
+  });
+}
+
+test('touching a bug costs 20 points and cuts the snake to half', () => {
+  const { core, saved } = bugBoard();
+  const hit = core.step();
+  assert.equal(hit.phase, 'running');
+  assert.equal(hit.score, 30);
+  assert.equal(hit.snake.length, 4, 'half of eight segments');
+  assert.deepEqual(plain(hit.snake[0]), { x: 11, y: 5 });
+  assert.deepEqual(plain(hit.snake[3]), { x: 8, y: 5 }, 'the tail is the part that goes');
+  assert.equal(hit.growthPending, 0);
+  assert.equal(hit.bug, null);
+  assert.equal(hit.bugHits, 1);
+  assert.equal(hit.bugBlocks, 0);
+  assert.equal(hit.best, 0, 'a bug never touches the best score');
+  assert.deepEqual(saved, []);
+  assert.equal(core.step().bugHits, 1, 'one bug hurts only once');
+
+  // Growth already owed lands first, then the whole snake is halved and the debt is dropped.
+  const growing = bugBoard({ growthPending: 2 }).core.step();
+  assert.equal(growing.snake.length, 5, 'nine segments keep five');
+  assert.equal(growing.growthPending, 0);
+});
+
+test('a bug keeps three segments, never goes below zero points and rounds up odd lengths', () => {
+  const short = bugBoard({ snake: [{ x: 10, y: 5 }, { x: 9, y: 5 }, { x: 8, y: 5 }], score: 10, growthPending: 0 });
+  const small = short.core.step();
+  assert.equal(small.snake.length, 3, 'a three segment snake keeps all of them');
+  assert.equal(small.score, 0, 'points stop at zero');
+  assert.equal(small.bugHits, 1);
+
+  const odd = bugBoard({ snake: LONG_SNAKE.slice(0, 7), growthPending: 0 });
+  assert.equal(odd.core.step().snake.length, 4, 'seven segments keep four');
+
+  const four = bugBoard({ snake: LONG_SNAKE.slice(0, 4), growthPending: 0 });
+  assert.equal(four.core.step().snake.length, 3, 'never fewer than three');
+});
+
+test('a live shield squashes the bug and is used up', () => {
+  const { core } = bugBoard({ shieldUntil: 5000, growthPending: 0 });
+  const blocked = core.step();
+  assert.equal(blocked.phase, 'running');
+  assert.equal(blocked.score, 50, 'no points lost');
+  assert.equal(blocked.snake.length, 8, 'no segments lost');
+  assert.equal(blocked.shieldUntil, 0);
+  assert.equal(blocked.bug, null);
+  assert.equal(blocked.bugBlocks, 1);
+  assert.equal(blocked.bugHits, 0);
+
+  const clock = createClock(5000);
+  const late = setup({
+    clock,
+    initialState: {
+      phase: 'running', snake: LONG_SNAKE, direction: 'right', pickup: OPEN_PICKUP,
+      bug: { x: 11, y: 5, expiresAt: 20000 }, score: 50, shieldUntil: 5000
+    }
+  });
+  assert.equal(late.core.step().bugHits, 1, 'an expired shield no longer protects');
+});
+
+test('a bug expires at its deadline and a respawning pickup avoids it', () => {
+  const clock = createClock();
+  const { core } = setup({
+    clock,
+    initialState: {
+      phase: 'running',
+      snake: START,
+      direction: 'right',
+      pickup: { x: 22, y: 0, kind: 'pi', expiresAt: 9000 },
+      bug: { x: 0, y: 0, expiresAt: 8000 }
+    }
+  });
+  clock.set(7999);
+  assert.ok(core.step().bug, 'still there at 7999 ms');
+  clock.set(8000);
+  assert.equal(core.step().bug, null, 'gone at its deadline');
+
+  // The respawn would pick the first free cell, which the bug occupies, so it takes the next one.
+  const crowded = setup({
+    clock: createClock(9000),
+    initialState: {
+      phase: 'running',
+      snake: START,
+      direction: 'right',
+      pickup: { x: 22, y: 0, kind: 'pi', expiresAt: 9000 },
+      bug: { x: 0, y: 0, expiresAt: 20000 }
+    }
+  });
+  const next = crowded.core.step();
+  assert.deepEqual([next.pickup.x, next.pickup.y], [1, 0]);
+  assert.ok(next.bug);
+
+  // Pause shifts the bug deadline like every other one.
+  const pauseClock = createClock();
+  const paused = setup({
+    clock: pauseClock,
+    initialState: {
+      phase: 'running', snake: START, direction: 'right', pickup: OPEN_PICKUP,
+      bug: { x: 0, y: 0, expiresAt: 9000 }
+    }
+  });
+  paused.core.pause();
+  pauseClock.advance(5000);
+  paused.core.start();
+  assert.equal(paused.core.getState().bug.expiresAt, 14000);
+});
+
+test('collecting an agent can spawn one bug, away from the head and the pickup', () => {
+  const state = (randomValues, fallbackRandom = 0) => setup({
+    randomValues,
+    fallbackRandom,
+    initialState: {
+      phase: 'running',
+      snake: START,
+      direction: 'right',
+      pickup: { x: 7, y: 8, kind: 'pi', expiresAt: 10000 }
+    }
+  });
+  // New pickup: cell 0, kind 0, lifetime 0. Then bug: chance 0.5, cell 0, lifetime 0.5.
+  const spawned = state([0, 0, 0, 0.5, 0, 0.5]).core.step();
+  assert.deepEqual([spawned.pickup.x, spawned.pickup.y], [0, 0]);
+  assert.deepEqual(plain(spawned.bug), { x: 1, y: 0, expiresAt: 10000 }, 'skips the pickup cell');
+
+  assert.equal(state([0, 0, 0, 0.4999]).core.step().bug, null, 'a low chance roll spawns nothing');
+  assert.equal(state([]).core.step().bug, null, 'a zero random stream never spawns a bug');
+
+  for (let step = 0; step < 100; step += 1) {
+    const roll = step / 100;
+    const board = state([0.3, 0, 0, 0.99, roll, roll]).core.step();
+    assert.ok(board.bug, 'a high chance roll spawns a bug');
+    const head = board.snake[0];
+    assert.ok(Math.abs(board.bug.x - head.x) + Math.abs(board.bug.y - head.y) >= 4, 'never next to the head');
+    assert.ok(!board.snake.some(point => point.x === board.bug.x && point.y === board.bug.y));
+    assert.ok(board.bug.x !== board.pickup.x || board.bug.y !== board.pickup.y);
+  }
+
+  // Only one bug at a time: a second collection keeps the first.
+  const twice = setup({
+    fallbackRandom: 0.99,
+    initialState: {
+      phase: 'running',
+      snake: START,
+      direction: 'right',
+      pickup: { x: 7, y: 8, kind: 'pi', expiresAt: 10000 },
+      bug: { x: 20, y: 14, expiresAt: 10000 }
+    }
+  });
+  assert.deepEqual(plain(twice.core.step().bug), { x: 20, y: 14, expiresAt: 10000 });
+});
+
+test('game over records why the run ended and restart clears the bug', () => {
+  const wall = setup({
+    initialState: {
+      phase: 'running', snake: [{ x: 0, y: 5 }, { x: 1, y: 5 }, { x: 2, y: 5 }], direction: 'left', pickup: OPEN_PICKUP
+    }
+  });
+  const hitWall = wall.core.step();
+  assert.equal(hitWall.result, 'lost');
+  assert.equal(hitWall.cause, 'wall');
+
+  const body = setup({
+    initialState: {
+      phase: 'running',
+      snake: [
+        { x: 1, y: 2 }, { x: 2, y: 2 }, { x: 3, y: 2 }, { x: 3, y: 3 },
+        { x: 2, y: 3 }, { x: 1, y: 3 }, { x: 0, y: 3 }
+      ],
+      direction: 'down',
+      pickup: OPEN_PICKUP
+    }
+  });
+  assert.equal(body.core.step().cause, 'body');
+
+  // A solo shielded snake that bounces off a wall still ends with the wall as the cause.
+  const solo = setup({
+    initialState: {
+      phase: 'running', snake: [{ x: 0, y: 5 }], direction: 'left', shieldUntil: 5000, pickup: OPEN_PICKUP
+    }
+  });
+  assert.equal(solo.core.step().cause, 'wall');
+
+  const full = [];
+  for (let y = 0; y < 16; y += 1) {
+    for (let column = 0; column < 24; column += 1) full.push({ x: y % 2 === 0 ? column : 23 - column, y });
+  }
+  const winning = setup({
+    initialState: {
+      phase: 'running',
+      snake: full.slice(0, 383).reverse(),
+      direction: 'left',
+      pickup: { x: 0, y: 15, kind: 'pi', expiresAt: 10000 },
+      bug: { x: 5, y: 5, expiresAt: 10000 }
+    }
+  });
+  const won = winning.core.step();
+  assert.equal(won.result, 'won');
+  assert.equal(won.cause, 'full');
+  assert.equal(won.bug, null, 'a won board has no bug left');
+
+  const hurt = bugBoard();
+  hurt.core.step();
+  hurt.core.restart();
+  const fresh = hurt.core.getState();
+  assert.equal(fresh.bug, null);
+  assert.equal(fresh.bugHits, 0);
+  assert.equal(fresh.bugBlocks, 0);
+  assert.equal(fresh.cause, null);
+});
+
+test('the orca bonus clears the bug and no new bug follows it', () => {
+  const orcaBoard = (bug, randomValues = [], fallbackRandom = 0) => setup({
+    randomValues,
+    fallbackRandom,
+    initialState: {
+      phase: 'running',
+      snake: START,
+      direction: 'right',
+      pickup: { x: 7, y: 8, kind: 'orca', expiresAt: 10000 },
+      bug,
+      score: 20
+    }
+  });
+  const cleared = orcaBoard({ x: 20, y: 14, expiresAt: 10000 }).core.step();
+  assert.equal(cleared.score, 120);
+  assert.equal(cleared.bug, null, 'the orca chases the bug away');
+  assert.equal(cleared.bugHits, 0);
+  // Every random draw is high, so any other pickup would roll a bug; the orca must not.
+  const quiet = orcaBoard(null, [0, 0, 0], 0.99).core.step();
+  assert.equal(quiet.bug, null, 'no bug spawns right after an orca');
+  const other = setup({
+    randomValues: [0, 0, 0],
+    fallbackRandom: 0.99,
+    initialState: {
+      phase: 'running', snake: START, direction: 'right', pickup: { x: 7, y: 8, kind: 'claude', expiresAt: 10000 }
+    }
+  });
+  assert.ok(other.core.step().bug, 'the same stream does spawn a bug after any other pickup');
+});
+
+test('the three agents are equally likely and the orca is rare', () => {
+  const counts = { pi: 0, claude: 0, codex: 0, orca: 0 };
+  const draws = 10000;
+  for (let index = 0; index < draws; index += 1) {
+    counts[setup({ randomValues: [0, (index + 0.5) / draws] }).core.getState().pickup.kind] += 1;
+  }
+  assert.equal(counts.orca, 200, 'two percent are orcas');
+  assert.ok(Math.abs(counts.pi - counts.claude) <= 1 && Math.abs(counts.claude - counts.codex) <= 1,
+    `the agents split evenly: ${JSON.stringify(counts)}`);
 });

@@ -1,0 +1,10 @@
+# Local tool and agent folders
+.claude/
+.freebuff/
+.codegraph/
+.zoku/
+.context-mode/
+
+# OS and editor files
+.DS_Store
+*.log
