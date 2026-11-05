@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 2,
+  "id": "orca-snake",
+  "publisher": "gentilfp",
+  "name": "Orca Snake",
+  "version": "0.1.0",
+  "execution": "sandboxed-ui",
+  "description": "A pixel art Snake for the Orca panel. Chase AI-themed pixel icons instead of ordinary food.",
+  "license": "MIT",
+  "repository": "https://github.com/gentilfp/orca-snakAI/tree/main/plugins/orca-snake",
+  "engines": { "orca": ">=1.4.245" },
+  "contributes": {
+    "panels": [{ "id": "snake", "title": "Orca Snake", "icon": "bot", "entry": "panel/index.html" }]
+  },
+  "capabilities": []
+}
