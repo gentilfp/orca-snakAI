@@ -36,14 +36,14 @@ You need Orca 1.4.245 or newer.
 ```sh
 git clone https://github.com/gentilfp/orca-snakAI.git
 cd orca-snakAI
-orca plugin dev load plugins/orca-snake
-orca plugin open gentilfp.orca-snake --panel snake
+orca plugin dev load plugins/orca-snakai
+orca plugin open gentilfp.orca-snakai --panel snakai
 ```
 
 Orca may print a fingerprint the first time. Re-run the `load` command with `--approve <fingerprint>`.
 Or open the panel from the **Orca snakAI** icon in the right sidebar.
 
-No Orca? Open `plugins/orca-snake/dev.html` in any browser and play there.
+No Orca? Open `plugins/orca-snakai/dev.html` in any browser and play there.
 
 ## Hacking on it
 
@@ -51,8 +51,8 @@ The whole game is plain JavaScript in `src/game.js`, with no dependencies. The s
 character grids in that file, so you can redraw them by hand.
 
 ```sh
-node plugins/orca-snake/scripts/build.mjs        # rebuild panel/index.html
-node --test plugins/orca-snake/tests/*.test.mjs  # run the tests
+node plugins/orca-snakai/scripts/build.mjs        # rebuild panel/index.html
+node --test plugins/orca-snakai/tests/*.test.mjs  # run the tests
 ```
 
 The pixel art is hand drawn and is not the official logo of any product.

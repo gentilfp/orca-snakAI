@@ -40,7 +40,7 @@
   // OSN-5: a spawned pickup expires after a random whole number of milliseconds in [8000, 12000].
   const PICKUP_TTL_MIN_MS = 8000;
   const BOOST_FACTOR = 0.7;
-  const BEST_KEY = 'orca-snake-best';
+  const BEST_KEY = 'orca-snakai-best';
 
   function toInteger(value, fallback) {
     const number = Math.floor(Number(value));
@@ -91,7 +91,7 @@
 
   // Pure Snake simulation. No canvas, DOM, storage, timers or global randomness:
   // OSN-3 owns rendering, input, frames and persistence wiring.
-  window.createOrcaSnakeCore = function (options) {
+  window.createSnakAICore = function (options) {
     const settings = options || {};
     const random = typeof settings.random === 'function' ? settings.random : Math.random;
     const now = typeof settings.now === 'function' ? settings.now : Date.now;
@@ -447,7 +447,7 @@
   };
 
   // Best-score adapter for OSN-3: the frame may deny localStorage, so keep the value in memory too.
-  window.createOrcaSnakeBestStore = function (options) {
+  window.createSnakAIBestStore = function (options) {
     const provided = options !== undefined && options !== null;
     let storage = null;
     if (provided) {
@@ -806,7 +806,7 @@
     return grid;
   }
 
-  window.createOrcaSnakeRenderer = function (canvas) {
+  window.createSnakAIRenderer = function (canvas) {
     const ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
     if (!ctx) throw new Error('Orca snakAI needs a 2D canvas.');
     ctx.imageSmoothingEnabled = false;
@@ -1139,7 +1139,7 @@
   }
 
   // Registers three render hooks. Idle hooks draw nothing and return false, so OSN-3 is unaffected.
-  window.installOrcaSnakeEffects = function (renderer) {
+  window.installSnakAIEffects = function (renderer) {
     if (!renderer || typeof renderer.addHook !== 'function') {
       throw new Error('Orca snakAI effects need a renderer.');
     }
@@ -1374,24 +1374,24 @@
   };
 
   // Canvas game on top of the OSN-2 core: input methods, callbacks and the frame loop.
-  window.createOrcaSnake = function (options) {
+  window.createSnakAI = function (options) {
     const settings = options || {};
     const onStateChange = typeof settings.onStateChange === 'function' ? settings.onStateChange : function () {};
     const onScore = typeof settings.onScore === 'function' ? settings.onScore : function () {};
     const now = typeof settings.now === 'function' ? settings.now : Date.now;
     const random = typeof settings.random === 'function' ? settings.random : Math.random;
 
-    const renderer = window.createOrcaSnakeRenderer(settings.canvas);
+    const renderer = window.createSnakAIRenderer(settings.canvas);
     // OSN-5 effects only add render hooks, so the core and the renderer stay untouched.
-    const effects = window.installOrcaSnakeEffects(renderer);
+    const effects = window.installSnakAIEffects(renderer);
     let core = settings.core;
     if (!core) {
       // An explicit `storage: null` disables persistence; omitting it auto-detects localStorage.
       const hasStorage = Object.prototype.hasOwnProperty.call(settings, 'storage');
       const store = hasStorage
-        ? window.createOrcaSnakeBestStore({ storage: settings.storage || null })
-        : window.createOrcaSnakeBestStore();
-      core = window.createOrcaSnakeCore({ now: now, random: random, loadBest: store.loadBest, saveBest: store.saveBest });
+        ? window.createSnakAIBestStore({ storage: settings.storage || null })
+        : window.createSnakAIBestStore();
+      core = window.createSnakAICore({ now: now, random: random, loadBest: store.loadBest, saveBest: store.saveBest });
     }
 
     let destroyed = false;

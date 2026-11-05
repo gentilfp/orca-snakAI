@@ -26,7 +26,7 @@ function createRandom(values = [], fallback = 0) {
 
 function setup({ clock = createClock(), initialState, randomValues = [], fallbackRandom = 0, loadBest, saveBest } = {}) {
   const saved = [];
-  const core = platform.createOrcaSnakeCore({
+  const core = platform.createSnakAICore({
     random: createRandom(randomValues, fallbackRandom),
     now: () => clock.now(),
     loadBest: loadBest || (() => 0),
@@ -568,29 +568,29 @@ test('persistence callbacks that throw do not stop play', () => {
   assert.equal(failingLoad.core.getState().phase, 'ready');
 });
 
-test('best store uses orca-snake-best and falls back safely when storage fails', () => {
+test('best store uses orca-snakai-best and falls back safely when storage fails', () => {
   const values = new Map();
   const storage = {
     getItem: key => (values.has(key) ? values.get(key) : null),
     setItem: (key, value) => { values.set(key, value); }
   };
-  const store = platform.createOrcaSnakeBestStore({ storage });
+  const store = platform.createSnakAIBestStore({ storage });
   assert.equal(store.loadBest(), 0);
   store.saveBest(12);
-  assert.equal(values.get('orca-snake-best'), '12');
+  assert.equal(values.get('orca-snakai-best'), '12');
   assert.equal(store.loadBest(), 12);
   store.saveBest(7);
   assert.equal(store.loadBest(), 12);
-  assert.equal(values.get('orca-snake-best'), '12');
+  assert.equal(values.get('orca-snakai-best'), '12');
 
-  const seeded = platform.createOrcaSnakeBestStore({ storage: { getItem: () => '42', setItem: () => {} } });
+  const seeded = platform.createSnakAIBestStore({ storage: { getItem: () => '42', setItem: () => {} } });
   assert.equal(seeded.loadBest(), 42);
-  const junk = platform.createOrcaSnakeBestStore({ storage: { getItem: () => 'not-a-number', setItem: () => {} } });
+  const junk = platform.createSnakAIBestStore({ storage: { getItem: () => 'not-a-number', setItem: () => {} } });
   assert.equal(junk.loadBest(), 0);
-  const negative = platform.createOrcaSnakeBestStore({ storage: { getItem: () => '-9', setItem: () => {} } });
+  const negative = platform.createSnakAIBestStore({ storage: { getItem: () => '-9', setItem: () => {} } });
   assert.equal(negative.loadBest(), 0);
 
-  const denied = platform.createOrcaSnakeBestStore({
+  const denied = platform.createSnakAIBestStore({
     storage: {
       getItem() { throw new Error('denied'); },
       setItem() { throw new Error('denied'); }
@@ -602,18 +602,18 @@ test('best store uses orca-snake-best and falls back safely when storage fails',
   denied.saveBest(3);
   assert.equal(denied.loadBest(), 8);
 
-  const writeBroken = platform.createOrcaSnakeBestStore({
+  const writeBroken = platform.createSnakAIBestStore({
     storage: { getItem: () => null, setItem() { throw new Error('quota'); } }
   });
   writeBroken.saveBest(5);
   assert.equal(writeBroken.loadBest(), 5);
 
-  const noStorage = platform.createOrcaSnakeBestStore();
+  const noStorage = platform.createSnakAIBestStore();
   assert.equal(noStorage.loadBest(), 0);
   noStorage.saveBest(9);
   assert.equal(noStorage.loadBest(), 9);
 
-  const positional = platform.createOrcaSnakeBestStore(storage);
+  const positional = platform.createSnakAIBestStore(storage);
   assert.equal(positional.loadBest(), 12);
 });
 

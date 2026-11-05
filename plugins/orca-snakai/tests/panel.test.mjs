@@ -123,7 +123,7 @@ function createHarness({ prefersDark = false } = {}) {
       this.calls.push('destroy');
     }
   };
-  window.createOrcaSnake = options => {
+  window.createSnakAI = options => {
     game.options = options;
     return game;
   };

@@ -8,16 +8,16 @@ const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'
 const CSP = "default-src 'none'; connect-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'";
 const MARKERS = ['/* PANEL_STYLES */', '/* GAME_ENGINE */', '/* PANEL_CONTROLLER */'];
 
-test('manifest describes the sandboxed orca-snake panel', () => {
+test('manifest describes the sandboxed orca-snakai panel', () => {
   const manifest = JSON.parse(read('orca-plugin.json'));
   assert.equal(manifest.manifestVersion, 2);
-  assert.equal(manifest.id, 'orca-snake');
+  assert.equal(manifest.id, 'orca-snakai');
   assert.equal(manifest.publisher, 'gentilfp');
   assert.equal(manifest.execution, 'sandboxed-ui');
   assert.deepEqual(manifest.capabilities, []);
   const panels = manifest.contributes.panels;
   assert.equal(panels.length, 1);
-  assert.equal(panels[0].id, 'snake');
+  assert.equal(panels[0].id, 'snakai');
   assert.equal(panels[0].entry, 'panel/index.html');
 });
 
@@ -41,8 +41,8 @@ test('build inlines styles and scripts into panel/index.html', () => {
   const html = readFileSync(entry, 'utf8');
   for (const marker of MARKERS) assert.ok(!html.includes(marker), `${marker} was replaced`);
   assert.ok(html.includes(CSP), 'the CSP survives the build');
-  assert.ok(html.includes('createOrcaSnake'), 'the game module is inlined');
-  const gameAt = html.indexOf('createOrcaSnake');
+  assert.ok(html.includes('createSnakAI'), 'the game module is inlined');
+  const gameAt = html.indexOf('createSnakAI');
   const controllerAt = html.indexOf('announcement.textContent');
   assert.ok(controllerAt > gameAt, 'game.js is inlined before panel.js');
 });

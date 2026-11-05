@@ -43,7 +43,7 @@
     announcement.textContent = `Ready. Press Space or an arrow key to start. Best ${best}.`
   }
 
-  const game = window.createOrcaSnake({
+  const game = window.createSnakAI({
     canvas,
     onStateChange(next, snapshot) {
       phase = next

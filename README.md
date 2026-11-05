@@ -4,6 +4,6 @@ A tiny Snake game that lives inside Orca, as a side panel plugin. Eat coding age
 
 ![Orca snakAI gameplay](docs/demo.gif)
 
-The plugin is in [`plugins/orca-snake`](plugins/orca-snake). Its README has the controls and how to install it.
+The plugin is in [`plugins/orca-snakai`](plugins/orca-snakai). Its README has the controls and how to install it.
 
 MIT licensed.

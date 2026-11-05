@@ -76,7 +76,7 @@ function snap(overrides = {}) {
 
 function makeRenderer(theme = 'light') {
   const { canvas, calls } = makeCanvas();
-  const renderer = platform.createOrcaSnakeRenderer(canvas);
+  const renderer = platform.createSnakAIRenderer(canvas);
   renderer.setTheme(theme);
   return { renderer, canvas, calls };
 }
@@ -269,7 +269,7 @@ function setupGame() {
   const raf = createRaf();
   platform.requestAnimationFrame = fn => raf.request(fn);
   platform.cancelAnimationFrame = id => raf.cancel(id);
-  const core = platform.createOrcaSnakeCore({
+  const core = platform.createSnakAICore({
     now: () => clock.now(),
     random: () => 0,
     loadBest: () => 0,
@@ -278,7 +278,7 @@ function setupGame() {
   const { canvas, calls } = makeCanvas();
   const stateChanges = [];
   const scoreChanges = [];
-  const game = platform.createOrcaSnake({
+  const game = platform.createSnakAI({
     canvas,
     core,
     now: () => clock.now(),
@@ -349,13 +349,13 @@ test('the renderer ignores calls after destroy', () => {
 });
 
 test('without a core the controller builds one and reads the stored best', () => {
-  const values = new Map([['orca-snake-best', '42']]);
+  const values = new Map([['orca-snakai-best', '42']]);
   const storage = {
     getItem: key => (values.has(key) ? values.get(key) : null),
     setItem: (key, value) => values.set(key, String(value))
   };
   const { canvas } = makeCanvas();
-  const game = platform.createOrcaSnake({ canvas, now: () => 0, random: () => 0, storage });
+  const game = platform.createSnakAI({ canvas, now: () => 0, random: () => 0, storage });
   const state = game.getState();
   assert.equal(state.phase, 'ready');
   assert.equal(state.best, 42);

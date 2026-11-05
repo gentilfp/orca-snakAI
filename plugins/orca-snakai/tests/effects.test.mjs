@@ -116,7 +116,7 @@ function setup() {
       return busy;
     }
   };
-  const effects = platform.installOrcaSnakeEffects(renderer);
+  const effects = platform.installSnakAIEffects(renderer);
   return { ctx, calls, renderer, effects };
 }
 
@@ -380,8 +380,8 @@ test('the shield outlines the head only while shielded and running', () => {
 
 test('the real renderer stays busy until the effects finish', () => {
   const { canvas, calls } = makeCanvas();
-  const renderer = platform.createOrcaSnakeRenderer(canvas);
-  const effects = platform.installOrcaSnakeEffects(renderer);
+  const renderer = platform.createSnakAIRenderer(canvas);
+  const effects = platform.installSnakAIEffects(renderer);
 
   assert.equal(renderer.isBusy(), false);
   renderer.render(snap({ score: 0 }), 0);
@@ -409,7 +409,7 @@ test('the real renderer stays busy until the effects finish', () => {
 });
 
 test('the installer rejects a missing renderer', () => {
-  assert.throws(() => platform.installOrcaSnakeEffects(null), /renderer/);
+  assert.throws(() => platform.installSnakAIEffects(null), /renderer/);
 });
 
 test('a bug hit shows a red label, shakes the board and is not mistaken for a restart', () => {
