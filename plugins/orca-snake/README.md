@@ -34,7 +34,8 @@ Hit a wall or your own tail and it's game over. Your best score is saved in the 
 You need Orca 1.4.245 or newer.
 
 ```sh
-git clone <this repo>
+git clone https://github.com/gentilfp/orca-snakAI.git
+cd orca-snakAI
 orca plugin dev load plugins/orca-snake
 orca plugin open gentilfp.orca-snake --panel snake
 ```
