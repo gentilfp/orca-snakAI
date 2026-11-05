@@ -1,14 +1,394 @@
 /* Orca Snake — original canvas game. Copyright (c) 2026 gentilfp. MIT. */
 (function () {
   'use strict';
-  // Scaffold only: paints the board and its grid so the panel can be checked in Orca.
-  // OSN-2 adds the pure game logic here; OSN-3 adds the renderer and the loop.
   const COLUMNS = 24;
   const ROWS = 16;
   const CELL = 30;
   const BOARD = '#1d6fa5';
   const GRID = '#2a86c0';
 
+  // Fixed simulation constants. OSN-3 renders 720x480 as a 24x16 grid of 30px cells.
+  const DIRECTIONS = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 }
+  };
+  const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+  const PHASES = ['ready', 'running', 'paused', 'gameover'];
+  const START_SNAKE = [{ x: 6, y: 8 }, { x: 5, y: 8 }, { x: 4, y: 8 }];
+  const PICKUPS = {
+    orca: { points: 10, growth: 1, boostMs: 0, shieldMs: 0 },
+    claude: { points: 25, growth: 2, boostMs: 3000, shieldMs: 0 },
+    codex: { points: 50, growth: 3, boostMs: 0, shieldMs: 5000 }
+  };
+  const PICKUP_LIFETIME_MS = 10000;
+  const BOOST_FACTOR = 0.7;
+  const BEST_KEY = 'orca-snake-best';
+
+  function toInteger(value, fallback) {
+    const number = Math.floor(Number(value));
+    return Number.isFinite(number) && number >= 0 ? number : fallback;
+  }
+
+  function parseStoredBest(raw) {
+    if (typeof raw === 'number') return toInteger(raw, 0);
+    if (typeof raw !== 'string') return 0;
+    const text = raw.trim();
+    if (!/^\d+$/.test(text)) return 0;
+    return toInteger(Number.parseInt(text, 10), 0);
+  }
+
+  function readBest(loadBest) {
+    try {
+      return toInteger(loadBest(), 0);
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  // Injected random values are clamped so a pathological source still yields a valid cell/weight.
+  function unitRandom(random) {
+    const value = Number(random());
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    if (value >= 1) return 0.999999999;
+    return value;
+  }
+
+  function pickKind(random) {
+    const roll = unitRandom(random);
+    if (roll < 0.7) return 'orca';
+    if (roll < 0.95) return 'claude';
+    return 'codex';
+  }
+
+  function copyPoint(point) {
+    return { x: point.x, y: point.y };
+  }
+
+  // Pure Snake simulation. No canvas, DOM, storage, timers or global randomness:
+  // OSN-3 owns rendering, input, frames and persistence wiring.
+  window.createOrcaSnakeCore = function (options) {
+    const settings = options || {};
+    const random = typeof settings.random === 'function' ? settings.random : Math.random;
+    const now = typeof settings.now === 'function' ? settings.now : Date.now;
+    const loadBest = typeof settings.loadBest === 'function' ? settings.loadBest : function () { return 0; };
+    const saveBest = typeof settings.saveBest === 'function' ? settings.saveBest : function () {};
+    // Test-only seed for awkward board states (full board, one-segment snake). Production omits it.
+    const testState = settings.testState;
+
+    let snake;
+    let direction;
+    let queuedDirections;
+    let pickup;
+    let score;
+    let best;
+    let growthPending;
+    let boostUntil;
+    let shieldUntil;
+    let phase;
+    let result;
+    let readyAt;
+    let pausedAt;
+
+    function snapshot() {
+      return {
+        phase: phase,
+        snake: snake.map(copyPoint),
+        direction: direction,
+        queuedDirections: queuedDirections.slice(),
+        pickup: pickup ? { x: pickup.x, y: pickup.y, kind: pickup.kind, expiresAt: pickup.expiresAt } : null,
+        score: score,
+        best: best,
+        growthPending: growthPending,
+        boostUntil: boostUntil,
+        shieldUntil: shieldUntil,
+        result: result
+      };
+    }
+
+    function finish(outcome) {
+      phase = 'gameover';
+      result = outcome;
+      queuedDirections = [];
+      readyAt = null;
+      pausedAt = null;
+      if (outcome === 'won') pickup = null;
+    }
+
+    function persistBest(value) {
+      try {
+        saveBest(value);
+      } catch (error) {
+        // A broken persistence callback must not stop play.
+      }
+    }
+
+    function bodyHas(x, y, ignoreTail) {
+      const limit = ignoreTail ? snake.length - 1 : snake.length;
+      for (let index = 0; index < limit; index += 1) {
+        if (snake[index].x === x && snake[index].y === y) return true;
+      }
+      return false;
+    }
+
+    function freeCells() {
+      const cells = [];
+      for (let y = 0; y < ROWS; y += 1) {
+        for (let x = 0; x < COLUMNS; x += 1) {
+          if (!bodyHas(x, y, false)) cells.push({ x: x, y: y });
+        }
+      }
+      return cells;
+    }
+
+    function spawnPickup(at) {
+      const cells = freeCells();
+      if (!cells.length) {
+        finish('won');
+        return;
+      }
+      const index = Math.floor(unitRandom(random) * cells.length);
+      const cell = cells[index];
+      pickup = { x: cell.x, y: cell.y, kind: pickKind(random), expiresAt: at + PICKUP_LIFETIME_MS };
+    }
+
+    function shiftDeadlines(elapsed) {
+      if (elapsed <= 0) return;
+      if (pickup && pickup.expiresAt > 0) pickup.expiresAt += elapsed;
+      if (boostUntil > 0) boostUntil += elapsed;
+      if (shieldUntil > 0) shieldUntil += elapsed;
+    }
+
+    function clearExpiredEffects(at) {
+      if (boostUntil > 0 && at >= boostUntil) boostUntil = 0;
+      if (shieldUntil > 0 && at >= shieldUntil) shieldUntil = 0;
+    }
+
+    function resetRun(at) {
+      snake = START_SNAKE.map(copyPoint);
+      direction = 'right';
+      queuedDirections = [];
+      score = 0;
+      growthPending = 0;
+      boostUntil = 0;
+      shieldUntil = 0;
+      result = null;
+      readyAt = null;
+      pausedAt = null;
+      phase = 'ready';
+      pickup = null;
+      spawnPickup(at);
+    }
+
+    function seedTestState(state, at) {
+      const seed = state || {};
+      snake = Array.isArray(seed.snake) && seed.snake.length
+        ? seed.snake.map(function (point) {
+          return { x: toInteger(point && point.x, 0), y: toInteger(point && point.y, 0) };
+        })
+        : START_SNAKE.map(copyPoint);
+      direction = DIRECTIONS[seed.direction] ? seed.direction : 'right';
+      queuedDirections = Array.isArray(seed.queuedDirections)
+        ? seed.queuedDirections.filter(function (turn) { return DIRECTIONS[turn]; }).slice(0, 2)
+        : [];
+      pickup = seed.pickup
+        ? {
+          x: toInteger(seed.pickup.x, 0),
+          y: toInteger(seed.pickup.y, 0),
+          kind: PICKUPS[seed.pickup.kind] ? seed.pickup.kind : 'orca',
+          expiresAt: toInteger(seed.pickup.expiresAt, at + PICKUP_LIFETIME_MS)
+        }
+        : null;
+      score = toInteger(seed.score, 0);
+      growthPending = toInteger(seed.growthPending, 0);
+      boostUntil = toInteger(seed.boostUntil, 0);
+      shieldUntil = toInteger(seed.shieldUntil, 0);
+      phase = PHASES.indexOf(seed.phase) >= 0 ? seed.phase : 'ready';
+      result = seed.result === 'won' || seed.result === 'lost' ? seed.result : null;
+      readyAt = phase === 'ready' ? at : null;
+      pausedAt = null;
+    }
+
+    function start() {
+      if (phase === 'running') return true;
+      const at = now();
+      if (phase === 'ready') {
+        if (readyAt !== null) shiftDeadlines(at - readyAt);
+        readyAt = null;
+        phase = 'running';
+        return true;
+      }
+      if (phase === 'paused') {
+        if (pausedAt !== null) shiftDeadlines(at - pausedAt);
+        pausedAt = null;
+        phase = 'running';
+        return true;
+      }
+      return false;
+    }
+
+    function pause() {
+      if (phase !== 'running') return false;
+      phase = 'paused';
+      pausedAt = now();
+      return true;
+    }
+
+    function togglePause() {
+      if (phase === 'running') return pause();
+      if (phase === 'paused') return start();
+      return false;
+    }
+
+    function restart() {
+      resetRun(now());
+      phase = 'running';
+      return true;
+    }
+
+    function queueDirection(turn) {
+      if (phase !== 'running') return false;
+      if (!DIRECTIONS[turn]) return false;
+      if (queuedDirections.length >= 2) return false;
+      const previous = queuedDirections.length ? queuedDirections[queuedDirections.length - 1] : direction;
+      if (OPPOSITE[turn] === previous) return false;
+      queuedDirections.push(turn);
+      return true;
+    }
+
+    function getTickMs() {
+      const at = now();
+      const interval = Math.max(60, 150 - 5 * Math.floor(score / 50));
+      return boostUntil > 0 && at < boostUntil ? interval * BOOST_FACTOR : interval;
+    }
+
+    function step() {
+      if (phase !== 'running') return snapshot();
+
+      const at = now();
+      clearExpiredEffects(at);
+      // A pickup left past its deadline respawns before the move; paused boards never reach here.
+      if (pickup && at >= pickup.expiresAt) spawnPickup(at);
+      if (phase !== 'running') return snapshot();
+
+      const proposed = queuedDirections.length ? queuedDirections[0] : direction;
+      const vector = DIRECTIONS[proposed];
+      const nextX = snake[0].x + vector.x;
+      const nextY = snake[0].y + vector.y;
+      const collects = pickup !== null && pickup.x === nextX && pickup.y === nextY;
+      // Growth keeps the tail, so entering the tail cell is only legal when nothing grows.
+      const grows = collects || growthPending > 0;
+      const hitsWall = nextX < 0 || nextX >= COLUMNS || nextY < 0 || nextY >= ROWS;
+      const hitsBody = !hitsWall && bodyHas(nextX, nextY, !grows);
+
+      if (hitsWall || hitsBody) {
+        if (shieldUntil > 0 && at < shieldUntil) {
+          shieldUntil = 0;
+          queuedDirections = [];
+          snake.pop();
+          if (!snake.length) finish('lost');
+        } else {
+          finish('lost');
+        }
+        return snapshot();
+      }
+
+      if (queuedDirections.length) queuedDirections.shift();
+      direction = proposed;
+      snake.unshift({ x: nextX, y: nextY });
+
+      let growth = growthPending;
+      if (collects) {
+        const reward = PICKUPS[pickup.kind];
+        score += reward.points;
+        growth += reward.growth;
+        if (reward.boostMs) boostUntil = at + reward.boostMs;
+        if (reward.shieldMs) shieldUntil = at + reward.shieldMs;
+        if (score > best) {
+          best = score;
+          persistBest(best);
+        }
+        pickup = null;
+      }
+
+      if (growth > 0) {
+        // The tail stays for this move; any remaining segments follow on later safe moves.
+        growthPending = growth - 1;
+      } else {
+        growthPending = 0;
+        snake.pop();
+      }
+
+      if (pickup === null) spawnPickup(at);
+      if (phase === 'running' && snake.length >= COLUMNS * ROWS) finish('won');
+      return snapshot();
+    }
+
+    if (testState) {
+      seedTestState(testState, now());
+    } else {
+      const startedAt = now();
+      resetRun(startedAt);
+      readyAt = startedAt;
+    }
+    best = readBest(loadBest);
+
+    return {
+      start: start,
+      pause: pause,
+      togglePause: togglePause,
+      restart: restart,
+      queueDirection: queueDirection,
+      step: step,
+      getState: snapshot,
+      getTickMs: getTickMs
+    };
+  };
+
+  // Best-score adapter for OSN-3: the frame may deny localStorage, so keep the value in memory too.
+  window.createOrcaSnakeBestStore = function (options) {
+    const provided = options !== undefined && options !== null;
+    let storage = null;
+    if (provided) {
+      storage = typeof options.getItem === 'function' ? options : (options.storage || null);
+    } else {
+      try {
+        storage = window.localStorage || null;
+      } catch (error) {
+        storage = null;
+      }
+    }
+
+    let best = 0;
+    if (storage) {
+      try {
+        best = parseStoredBest(storage.getItem(BEST_KEY));
+      } catch (error) {
+        best = 0;
+      }
+    }
+
+    function loadBest() {
+      return best;
+    }
+
+    function saveBest(value) {
+      const next = toInteger(value, 0);
+      if (next > best) best = next;
+      if (!storage) return;
+      try {
+        storage.setItem(BEST_KEY, String(best));
+      } catch (error) {
+        // Keep the in-memory best when storage is denied or full.
+      }
+    }
+
+    return { loadBest: loadBest, saveBest: saveBest };
+  };
+
+  // Scaffold only: paints the board and its grid so the panel can be checked in Orca.
+  // OSN-3 replaces the body of this factory with the renderer and the frame loop.
   window.createOrcaSnake = function ({ canvas, onStateChange = function () {}, onScore = function () {} }) {
     const context = canvas.getContext('2d');
     context.imageSmoothingEnabled = false;
