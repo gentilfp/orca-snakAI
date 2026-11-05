@@ -43,6 +43,6 @@ test('build inlines styles and scripts into panel/index.html', () => {
   assert.ok(html.includes(CSP), 'the CSP survives the build');
   assert.ok(html.includes('createOrcaSnake'), 'the game module is inlined');
   const gameAt = html.indexOf('createOrcaSnake');
-  const controllerAt = html.indexOf('Orca Snake scaffold loaded.');
+  const controllerAt = html.indexOf('announcement.textContent');
   assert.ok(controllerAt > gameAt, 'game.js is inlined before panel.js');
 });

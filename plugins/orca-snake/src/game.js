@@ -4,8 +4,8 @@
   const COLUMNS = 24;
   const ROWS = 16;
   const CELL = 30;
-  const BOARD = '#1d6fa5';
-  const GRID = '#2a86c0';
+  // Every sprite is a 6x6 grid of 5px art pixels, so 6 * ART fills one 30px cell exactly.
+  const ART = 5;
 
   // Fixed simulation constants. OSN-3 renders 720x480 as a 24x16 grid of 30px cells.
   const DIRECTIONS = {
@@ -387,20 +387,450 @@
     return { loadBest: loadBest, saveBest: saveBest };
   };
 
-  // Scaffold only: paints the board and its grid so the panel can be checked in Orca.
-  // OSN-3 replaces the body of this factory with the renderer and the frame loop.
-  window.createOrcaSnake = function ({ canvas, onStateChange = function () {}, onScore = function () {} }) {
-    const context = canvas.getContext('2d');
-    context.imageSmoothingEnabled = false;
-    context.fillStyle = BOARD;
-    context.fillRect(0, 0, COLUMNS * CELL, ROWS * CELL);
-    // A lighter tint on alternating cells keeps the 24x16 grid visible on any panel width.
-    context.fillStyle = GRID;
-    for (let row = 0; row < ROWS; row += 1) {
-      for (let column = (row % 2); column < COLUMNS; column += 2) {
-        context.fillRect(column * CELL + 1, row * CELL + 1, CELL - 2, CELL - 2);
+  // ---- Renderer -----------------------------------------------------------------------------
+  // One character per art pixel; '.' is transparent. The snake and pickups are original art.
+  const HEAD_ART = [
+    '.gggg.',
+    'gggwkg',
+    'gggggg',
+    'gggggg',
+    'gggwkg',
+    '.gggg.'
+  ];
+  const BODY_ART = [
+    '.gggg.',
+    'gggggg',
+    'ggghgg',
+    'gggggg',
+    'gggggg',
+    '.gggg.'
+  ];
+  const PICKUP_ART = {
+    // Orca: a blunt little whale, dark back and pale belly.
+    orca: {
+      rows: ['..kk..', '.kkkkk', 'kkwkkk', 'kwwwwk', '.kwwk.', '..kk..'],
+      colors: { k: '#10263a', w: '#f4fbff' }
+    },
+    // Claude: the orange spark, two warm tones only.
+    claude: {
+      rows: ['..oo..', 'o.oo.o', '.oyyo.', 'oooooo', '.oyyo.', 'o.oo.o'],
+      colors: { o: '#d97757', y: '#f6c992' }
+    },
+    // Codex: a teal terminal box with a prompt mark.
+    codex: {
+      rows: ['cccccc', 'cw...c', 'c.w..c', 'cw.wwc', 'c....c', 'cccccc'],
+      colors: { c: '#19a89b', w: '#ccfff9' }
+    }
+  };
+  // 3x5 pixel font copied from the runner for the letters and digits the HUD needs.
+  const FONT = {
+    '0': ['###', '#.#', '#.#', '#.#', '###'], '1': ['.#.', '##.', '.#.', '.#.', '###'],
+    '2': ['###', '..#', '###', '#..', '###'], '3': ['###', '..#', '.##', '..#', '###'],
+    '4': ['#.#', '#.#', '###', '..#', '..#'], '5': ['###', '#..', '###', '..#', '###'],
+    '6': ['###', '#..', '###', '#.#', '###'], '7': ['###', '..#', '..#', '.#.', '.#.'],
+    '8': ['###', '#.#', '###', '#.#', '###'], '9': ['###', '#.#', '###', '..#', '###'],
+    ' ': ['..', '..', '..', '..', '..'],
+    A: ['.#.', '#.#', '###', '#.#', '#.#'], B: ['##.', '#.#', '##.', '#.#', '##.'],
+    C: ['.##', '#..', '#..', '#..', '.##'], D: ['##.', '#.#', '#.#', '#.#', '##.'],
+    E: ['###', '#..', '##.', '#..', '###'], G: ['.##.', '#...', '#.##', '#..#', '.##.'],
+    L: ['#..', '#..', '#..', '#..', '###'], M: ['#...#', '##.##', '#.#.#', '#...#', '#...#'],
+    N: ['#..#', '##.#', '#.##', '#..#', '#..#'], O: ['.##.', '#..#', '#..#', '#..#', '.##.'],
+    P: ['##.', '#.#', '##.', '#..', '#..'], R: ['##.', '#.#', '##.', '#.#', '#.#'],
+    S: ['.##', '#..', '.#.', '..#', '##.'], T: ['###', '.#.', '.#.', '.#.', '.#.'],
+    U: ['#.#', '#.#', '#.#', '#.#', '###'], V: ['#.#', '#.#', '#.#', '#.#', '.#.'],
+    W: ['#...#', '#...#', '#.#.#', '##.##', '#...#']
+  };
+  // Light and dark are the only themes; both keep the board quiet so the snake reads clearly.
+  const PALETTES = {
+    light: {
+      boardA: '#eaf6fc',
+      boardB: '#dbeefa',
+      ink: '#10273b',
+      shadow: '#ffffff',
+      scrim: 'rgba(234, 246, 252, 0.82)',
+      bodyA: '#3fae5a',
+      bodyB: '#2f8f49',
+      head: '#5fd07a'
+    },
+    dark: {
+      boardA: '#102838',
+      boardB: '#0b1f2d',
+      ink: '#eaf6fc',
+      shadow: '#04121c',
+      scrim: 'rgba(4, 16, 26, 0.82)',
+      bodyA: '#54cf74',
+      bodyB: '#3aa85a',
+      head: '#7ce69a'
+    }
+  };
+  const TURN_STEPS = { right: 0, down: 1, left: 2, up: 3 };
+
+  function rotateClockwise(rows) {
+    const size = rows.length;
+    return rows.map(function (unused, y) {
+      let line = '';
+      for (let x = 0; x < size; x += 1) line += rows[size - 1 - x][y];
+      return line;
+    });
+  }
+
+  // The head art faces right; rotate it in 90 degree steps for the other directions.
+  function orient(rows, direction) {
+    let grid = rows;
+    const steps = TURN_STEPS[direction] || 0;
+    for (let step = 0; step < steps; step += 1) grid = rotateClockwise(grid);
+    return grid;
+  }
+
+  window.createOrcaSnakeRenderer = function (canvas) {
+    const ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+    if (!ctx) throw new Error('Orca Snake needs a 2D canvas.');
+    ctx.imageSmoothingEnabled = false;
+
+    const hooks = Object.create(null);
+    let theme = 'light';
+    let palette = PALETTES.light;
+    let previous = null;
+    let busy = false;
+    let destroyed = false;
+
+    function fillCell(view, x, y, color) {
+      view.ctx.fillStyle = color;
+      view.ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+    }
+
+    function drawSprite(view, grid, colors, cellX, cellY) {
+      for (let row = 0; row < grid.length; row += 1) {
+        const line = grid[row];
+        for (let column = 0; column < line.length; column += 1) {
+          const color = colors[line[column]];
+          if (!color) continue;
+          view.ctx.fillStyle = color;
+          view.ctx.fillRect(cellX * CELL + column * ART, cellY * CELL + row * ART, ART, ART);
+        }
       }
     }
-    return { destroy() {} };
+
+    function drawText(view, text, x, y, color, scale) {
+      const unit = ART * (scale || 1);
+      let penX = x;
+      for (const character of String(text)) {
+        const glyph = FONT[character] || FONT[' '];
+        for (let row = 0; row < glyph.length; row += 1) {
+          const line = glyph[row];
+          for (let column = 0; column < line.length; column += 1) {
+            if (line[column] !== '#') continue;
+            view.ctx.fillStyle = color;
+            view.ctx.fillRect(penX + column * unit, y + row * unit, unit, unit);
+          }
+        }
+        penX += (glyph[0].length + 1) * unit;
+      }
+    }
+
+    function textWidth(text, scale) {
+      const unit = ART * (scale || 1);
+      let width = 0;
+      for (const character of String(text)) width += ((FONT[character] || FONT[' '])[0].length + 1) * unit;
+      return width - unit;
+    }
+
+    function drawBoard(view) {
+      for (let y = 0; y < ROWS; y += 1) {
+        for (let x = 0; x < COLUMNS; x += 1) {
+          fillCell(view, x, y, (x + y) % 2 === 0 ? view.palette.boardA : view.palette.boardB);
+        }
+      }
+    }
+
+    function drawPickup(view) {
+      const pickup = view.snapshot.pickup;
+      if (!pickup) return;
+      const art = PICKUP_ART[pickup.kind] || PICKUP_ART.orca;
+      drawSprite(view, art.rows, art.colors, pickup.x, pickup.y);
+    }
+
+    function drawSnake(view) {
+      const snake = view.snapshot.snake || [];
+      for (let index = snake.length - 1; index >= 1; index -= 1) {
+        const segment = snake[index];
+        drawSprite(view, BODY_ART, {
+          g: index % 2 === 0 ? view.palette.bodyA : view.palette.bodyB,
+          h: view.palette.head
+        }, segment.x, segment.y);
+      }
+      if (!snake.length) return;
+      const head = snake[0];
+      drawSprite(view, orient(HEAD_ART, view.snapshot.direction), {
+        g: view.palette.head,
+        w: '#f2fbff',
+        k: view.palette.ink
+      }, head.x, head.y);
+    }
+
+    function drawHud(view) {
+      const scoreText = 'SCORE ' + String(view.snapshot.score).padStart(4, '0');
+      const bestText = 'BEST ' + String(view.snapshot.best).padStart(4, '0');
+      const top = ART;
+      drawText(view, scoreText, ART + ART, top + ART, view.palette.shadow, 1);
+      drawText(view, scoreText, ART, top, view.palette.ink, 1);
+      const bestLeft = COLUMNS * CELL - ART - textWidth(bestText, 1);
+      drawText(view, bestText, bestLeft + ART, top + ART, view.palette.shadow, 1);
+      drawText(view, bestText, bestLeft, top, view.palette.ink, 1);
+    }
+
+    function drawOverlay(view) {
+      const snapshot = view.snapshot;
+      const centerX = (COLUMNS * CELL) / 2;
+      const centerY = (ROWS * CELL) / 2;
+
+      function centered(text, y, color, scale) {
+        drawText(view, text, Math.round(centerX - textWidth(text, scale) / 2) + ART, y + ART, view.palette.shadow, scale);
+        drawText(view, text, Math.round(centerX - textWidth(text, scale) / 2), y, color, scale);
+      }
+
+      if (snapshot.phase === 'ready') {
+        // Above the starting snake, which sits in the middle row.
+        centered('PRESS SPACE TO START', Math.round(ROWS * CELL * 0.28), view.palette.ink, 1);
+        return;
+      }
+      if (snapshot.phase !== 'paused' && snapshot.phase !== 'gameover') return;
+
+      view.ctx.fillStyle = view.palette.scrim;
+      view.ctx.fillRect(0, 0, COLUMNS * CELL, ROWS * CELL);
+
+      if (snapshot.phase === 'paused') {
+        centered('PAUSED', Math.round(centerY - 50), view.palette.ink, 2);
+        centered('PRESS SPACE', Math.round(centerY + 20), view.palette.ink, 1);
+        return;
+      }
+
+      centered(snapshot.result === 'won' ? 'WELL DONE' : 'GAME OVER', 150, view.palette.ink, 2);
+      centered('SCORE ' + String(snapshot.score), 220, view.palette.ink, 1);
+      if (snapshot.score === snapshot.best && snapshot.score > 0) {
+        centered('NEW BEST', 250, view.palette.head, 1);
+      }
+    }
+
+    function runHooks(slot, view) {
+      const list = hooks[slot];
+      if (!list || !list.length) return false;
+      let animating = false;
+      for (let index = 0; index < list.length; index += 1) {
+        if (list[index](view)) animating = true;
+      }
+      return animating;
+    }
+
+    function makeView(snapshot, at) {
+      return {
+        ctx: ctx,
+        snapshot: snapshot,
+        previous: previous,
+        now: at,
+        theme: theme,
+        palette: palette,
+        COLS: COLUMNS,
+        ROWS: ROWS,
+        CELL: CELL,
+        ART: ART,
+        drawSprite: drawSprite,
+        drawText: drawText,
+        fillCell: fillCell
+      };
+    }
+
+    return {
+      render: function (snapshot, at) {
+        if (destroyed || !snapshot) return;
+        const view = makeView(snapshot, at);
+        busy = false;
+        view.ctx.save();
+        if (runHooks('beforeScene', view)) busy = true;
+        drawBoard(view);
+        if (runHooks('afterBoard', view)) busy = true;
+        drawPickup(view);
+        if (runHooks('afterPickup', view)) busy = true;
+        drawSnake(view);
+        if (runHooks('afterSnake', view)) busy = true;
+        view.ctx.restore();
+        drawHud(view);
+        if (runHooks('afterHud', view)) busy = true;
+        drawOverlay(view);
+        if (runHooks('afterOverlay', view)) busy = true;
+        previous = snapshot;
+      },
+      setTheme: function (name) {
+        theme = name === 'dark' ? 'dark' : 'light';
+        palette = PALETTES[theme];
+      },
+      addHook: function (slot, fn) {
+        if (destroyed || typeof slot !== 'string' || typeof fn !== 'function') return;
+        if (!hooks[slot]) hooks[slot] = [];
+        hooks[slot].push(fn);
+      },
+      isBusy: function () {
+        return busy && !destroyed;
+      },
+      destroy: function () {
+        if (destroyed) return;
+        destroyed = true;
+        busy = false;
+        previous = null;
+        for (const slot of Object.keys(hooks)) delete hooks[slot];
+      }
+    };
+  };
+
+  // Canvas game on top of the OSN-2 core: input methods, callbacks and the frame loop.
+  window.createOrcaSnake = function (options) {
+    const settings = options || {};
+    const onStateChange = typeof settings.onStateChange === 'function' ? settings.onStateChange : function () {};
+    const onScore = typeof settings.onScore === 'function' ? settings.onScore : function () {};
+    const now = typeof settings.now === 'function' ? settings.now : Date.now;
+    const random = typeof settings.random === 'function' ? settings.random : Math.random;
+
+    const renderer = window.createOrcaSnakeRenderer(settings.canvas);
+    let core = settings.core;
+    if (!core) {
+      // An explicit `storage: null` disables persistence; omitting it auto-detects localStorage.
+      const hasStorage = Object.prototype.hasOwnProperty.call(settings, 'storage');
+      const store = hasStorage
+        ? window.createOrcaSnakeBestStore({ storage: settings.storage || null })
+        : window.createOrcaSnakeBestStore();
+      core = window.createOrcaSnakeCore({ now: now, random: random, loadBest: store.loadBest, saveBest: store.saveBest });
+    }
+
+    let destroyed = false;
+    let frame = null;
+    let lastStep = now();
+    let lastPhase = null;
+    let lastScore = -1;
+    let lastBest = -1;
+
+    function cancelFrame() {
+      if (frame === null) return;
+      window.cancelAnimationFrame(frame);
+      frame = null;
+    }
+
+    function scheduleFrame() {
+      if (destroyed || frame !== null) return;
+      frame = window.requestAnimationFrame(onFrame);
+    }
+
+    function sync() {
+      const snapshot = core.getState();
+      if (snapshot.phase !== lastPhase) {
+        lastPhase = snapshot.phase;
+        onStateChange(snapshot.phase, snapshot);
+      }
+      if (snapshot.score !== lastScore || snapshot.best !== lastBest) {
+        lastScore = snapshot.score;
+        lastBest = snapshot.best;
+        onScore(snapshot.score, snapshot.best);
+      }
+      renderer.render(snapshot, now());
+      return snapshot;
+    }
+
+    function keepFrames() {
+      if (destroyed) return;
+      if (core.getState().phase === 'running' || renderer.isBusy()) scheduleFrame();
+    }
+
+    function onFrame() {
+      frame = null;
+      if (destroyed) return;
+      if (core.getState().phase === 'running') {
+        const at = now();
+        const tick = core.getTickMs();
+        if (at - lastStep >= tick) {
+          // After a stall, restart the clock instead of replaying the missed steps.
+          if (at - lastStep >= tick * 2) lastStep = at;
+          else lastStep += tick;
+          core.step();
+          sync();
+        } else {
+          renderer.render(core.getState(), now());
+        }
+      } else {
+        renderer.render(core.getState(), now());
+      }
+      keepFrames();
+    }
+
+    function start() {
+      if (destroyed) return;
+      if (core.getState().phase === 'gameover') {
+        restart();
+        return;
+      }
+      if (core.start()) lastStep = now();
+      sync();
+      keepFrames();
+    }
+
+    function pause() {
+      if (destroyed) return;
+      if (core.getState().phase !== 'running') return;
+      core.pause();
+      cancelFrame();
+      sync();
+      keepFrames();
+    }
+
+    function togglePause() {
+      if (destroyed) return;
+      const phase = core.getState().phase;
+      if (phase === 'running') pause();
+      else if (phase === 'paused') start();
+    }
+
+    function restart() {
+      if (destroyed) return;
+      core.restart();
+      lastStep = now();
+      sync();
+      keepFrames();
+    }
+
+    function queueDirection(direction) {
+      if (destroyed) return;
+      core.queueDirection(direction);
+      sync();
+      keepFrames();
+    }
+
+    function getState() {
+      return core.getState();
+    }
+
+    function setTheme(name) {
+      if (destroyed) return;
+      renderer.setTheme(name);
+      renderer.render(core.getState(), now());
+    }
+
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      cancelFrame();
+      renderer.destroy();
+    }
+
+    sync();
+    keepFrames();
+
+    return {
+      start: start,
+      pause: pause,
+      togglePause: togglePause,
+      restart: restart,
+      queueDirection: queueDirection,
+      getState: getState,
+      setTheme: setTheme,
+      destroy: destroy
+    };
   };
 })();
