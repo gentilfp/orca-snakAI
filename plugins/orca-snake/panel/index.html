@@ -56,7 +56,8 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
     claude: { points: 25, growth: 2, boostMs: 3000, shieldMs: 0 },
     codex: { points: 50, growth: 3, boostMs: 0, shieldMs: 5000 }
   };
-  const PICKUP_LIFETIME_MS = 10000;
+  // OSN-5: a spawned pickup expires after a random whole number of milliseconds in [8000, 12000].
+  const PICKUP_TTL_MIN_MS = 8000;
   const BOOST_FACTOR = 0.7;
   const BEST_KEY = 'orca-snake-best';
 
@@ -94,6 +95,13 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
     if (roll < 0.7) return 'orca';
     if (roll < 0.95) return 'claude';
     return 'codex';
+  }
+
+  // The lifetime roll is the third and last draw of a spawn, so cell and kind stay deterministic.
+  function pickupTtl(random) {
+    const value = Number(random());
+    const roll = Number.isFinite(value) ? Math.min(Math.max(value, 0), 0.999999) : 0;
+    return PICKUP_TTL_MIN_MS + Math.floor(roll * 4001);
   }
 
   function copyPoint(point) {
@@ -184,7 +192,9 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
       }
       const index = Math.floor(unitRandom(random) * cells.length);
       const cell = cells[index];
-      pickup = { x: cell.x, y: cell.y, kind: pickKind(random), expiresAt: at + PICKUP_LIFETIME_MS };
+      // Cell, kind, then lifetime: a scripted random stream still picks the same cell and kind.
+      const kind = pickKind(random);
+      pickup = { x: cell.x, y: cell.y, kind: kind, expiresAt: at + pickupTtl(random) };
     }
 
     function shiftDeadlines(elapsed) {
@@ -231,7 +241,7 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
           x: toInteger(seed.pickup.x, 0),
           y: toInteger(seed.pickup.y, 0),
           kind: PICKUPS[seed.pickup.kind] ? seed.pickup.kind : 'orca',
-          expiresAt: toInteger(seed.pickup.expiresAt, at + PICKUP_LIFETIME_MS)
+          expiresAt: toInteger(seed.pickup.expiresAt, at + PICKUP_TTL_MIN_MS)
         }
         : null;
       score = toInteger(seed.score, 0);
@@ -456,7 +466,7 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
       colors: { c: '#19a89b', w: '#ccfff9' }
     }
   };
-  // 3x5 pixel font copied from the runner for the letters and digits the HUD needs.
+  // 3x5 pixel font in the runner's style for the HUD and the OSN-5 effect labels.
   const FONT = {
     '0': ['###', '#.#', '#.#', '#.#', '###'], '1': ['.#.', '##.', '.#.', '.#.', '###'],
     '2': ['###', '..#', '###', '#..', '###'], '3': ['###', '..#', '.##', '..#', '###'],
@@ -467,12 +477,14 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
     A: ['.#.', '#.#', '###', '#.#', '#.#'], B: ['##.', '#.#', '##.', '#.#', '##.'],
     C: ['.##', '#..', '#..', '#..', '.##'], D: ['##.', '#.#', '#.#', '#.#', '##.'],
     E: ['###', '#..', '##.', '#..', '###'], G: ['.##.', '#...', '#.##', '#..#', '.##.'],
+    H: ['#.#', '#.#', '###', '#.#', '#.#'], I: ['###', '.#.', '.#.', '.#.', '###'],
     L: ['#..', '#..', '#..', '#..', '###'], M: ['#...#', '##.##', '#.#.#', '#...#', '#...#'],
     N: ['#..#', '##.#', '#.##', '#..#', '#..#'], O: ['.##.', '#..#', '#..#', '#..#', '.##.'],
     P: ['##.', '#.#', '##.', '#..', '#..'], R: ['##.', '#.#', '##.', '#.#', '#.#'],
     S: ['.##', '#..', '.#.', '..#', '##.'], T: ['###', '.#.', '.#.', '.#.', '.#.'],
     U: ['#.#', '#.#', '#.#', '#.#', '###'], V: ['#.#', '#.#', '#.#', '#.#', '.#.'],
-    W: ['#...#', '#...#', '#.#.#', '##.##', '#...#']
+    W: ['#...#', '#...#', '#.#.#', '##.##', '#...#'],
+    X: ['#.#', '#.#', '.#.', '#.#', '#.#'], '+': ['...', '.#.', '###', '.#.', '...']
   };
   // Light and dark are the only themes; both keep the board quiet so the snake reads clearly.
   const PALETTES = {
@@ -716,6 +728,282 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
     };
   };
 
+  // ---- OSN-5 effects -----------------------------------------------------------------------
+  // Copy and colours per pickup; effects only read rendered snapshots, so the core stays untouched.
+  const EFFECT_KINDS = {
+    orca: { text: '+10 ORCA', primary: '#f4fbff', secondary: '#6fb7e8' },
+    claude: { text: '+25 CLAUDE', primary: '#f39a4c', secondary: '#ffd86b' },
+    codex: { text: '+50 CODEX', primary: '#3cc9b5', secondary: '#3cc9b5' }
+  };
+  const SCORE_KINDS = { 10: 'orca', 25: 'claude', 50: 'codex' };
+  const LABEL_MS = 800;
+  const LABEL_BLINK_MS = 200;
+  const BURST_MS = 450;
+  const FLASH_MS = 140;
+  const SHAKE_MS = 400;
+  const MAX_LABELS = 4;
+  const MAX_PARTICLES = 32;
+  const MAX_FLASHES = 8;
+  const BURST_DIRECTIONS = [
+    { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: -1, y: 1 },
+    { x: -1, y: 0 }, { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 }
+  ];
+  const BOOST_COLOR = '#f39a4c';
+  const SHIELD_COLOR = '#3cc9b5';
+
+  // The renderer keeps its width helper private, so measure the same way its drawText lays out.
+  function artTextWidth(text, scale) {
+    const unit = ART * (scale || 1);
+    let width = 0;
+    for (const character of String(text)) width += ((FONT[character] || FONT[' '])[0].length + 1) * unit;
+    return width - unit;
+  }
+
+  // Effects age from the frame clock; a render before the effect started counts as age 0.
+  function effectAge(effect, at) {
+    return Math.max(0, at - effect.at);
+  }
+
+  // Blink off on alternating slices near the end of an effect's life.
+  function effectVisible(age, duration, blinkFrom, slice) {
+    if (age >= duration) return false;
+    if (age < blinkFrom) return true;
+    return Math.floor((age - blinkFrom) / slice) % 2 === 0;
+  }
+
+  function prefersReducedMotion() {
+    try {
+      const query = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+      return Boolean(query && query.matches);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // Registers three render hooks. Idle hooks draw nothing and return false, so OSN-3 is unaffected.
+  window.installOrcaSnakeEffects = function (renderer) {
+    if (!renderer || typeof renderer.addHook !== 'function') {
+      throw new Error('Orca Snake effects need a renderer.');
+    }
+
+    let labels = [];
+    let particles = [];
+    let flashes = [];
+    let shake = null;
+    let destroyed = false;
+
+    function clear() {
+      labels = [];
+      particles = [];
+      flashes = [];
+      shake = null;
+    }
+
+    function hasEffects() {
+      return labels.length > 0 || particles.length > 0 || flashes.length > 0 || shake !== null;
+    }
+
+    function prune(at) {
+      labels = labels.filter(function (label) { return effectAge(label, at) < LABEL_MS; });
+      particles = particles.filter(function (particle) { return effectAge(particle, at) < BURST_MS; });
+      flashes = flashes.filter(function (flash) { return effectAge(flash, at) < FLASH_MS; });
+      if (shake !== null && effectAge(shake, at) >= SHAKE_MS) shake = null;
+    }
+
+    function addPickupEffects(view, kind) {
+      const head = view.snapshot.snake && view.snapshot.snake[0];
+      if (!head) return;
+      const art = EFFECT_KINDS[kind];
+      labels.push({ kind: kind, x: head.x, y: head.y, at: view.now });
+      while (labels.length > MAX_LABELS) labels.shift();
+      flashes.push({ x: head.x, y: head.y, at: view.now });
+      while (flashes.length > MAX_FLASHES) flashes.shift();
+      const centerX = head.x * view.CELL + view.CELL / 2;
+      const centerY = head.y * view.CELL + view.CELL / 2;
+      for (let index = 0; index < BURST_DIRECTIONS.length; index += 1) {
+        const direction = BURST_DIRECTIONS[index];
+        particles.push({
+          x: centerX,
+          y: centerY,
+          dx: direction.x,
+          dy: direction.y,
+          color: index % 2 === 0 ? art.primary : art.secondary,
+          at: view.now
+        });
+      }
+      while (particles.length > MAX_PARTICLES) particles.shift();
+    }
+
+    // Compare consecutive snapshots, so a re-render cannot spawn a second set of effects.
+    function detect(view) {
+      const previous = view.previous;
+      const snapshot = view.snapshot;
+      if (!previous || !snapshot) return;
+      const restarted = snapshot.score < previous.score
+        || snapshot.phase === 'ready'
+        || (previous.phase === 'gameover' && snapshot.phase === 'running');
+      if (restarted) clear();
+      if (snapshot.score > previous.score) {
+        const kind = SCORE_KINDS[snapshot.score - previous.score];
+        if (kind) addPickupEffects(view, kind);
+      }
+      if (previous.phase === 'running' && snapshot.phase === 'gameover'
+        && snapshot.result === 'lost' && !prefersReducedMotion()) {
+        shake = { at: view.now };
+      }
+    }
+
+    function drawShake(view) {
+      if (shake === null) return;
+      const age = effectAge(shake, view.now);
+      if (age >= SHAKE_MS) return;
+      const amplitude = ART * (1 - age / SHAKE_MS);
+      // Screen space, so the HUD and overlay drawn after the renderer's restore stay still.
+      view.ctx.fillStyle = view.palette.boardB;
+      view.ctx.fillRect(0, 0, view.COLS * view.CELL, view.ROWS * view.CELL);
+      view.ctx.translate(
+        Math.round(Math.sin(age * 0.11) * amplitude),
+        Math.round(Math.cos(age * 0.17) * amplitude * 0.6)
+      );
+    }
+
+    function drawFlashAndBurst(view) {
+      const ctx = view.ctx;
+      ctx.save();
+      for (let index = 0; index < flashes.length; index += 1) {
+        const flash = flashes[index];
+        const age = effectAge(flash, view.now);
+        if (age >= FLASH_MS) continue;
+        ctx.globalAlpha = 1 - age / FLASH_MS;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(flash.x * view.CELL, flash.y * view.CELL, view.CELL, view.CELL);
+      }
+      for (let index = 0; index < particles.length; index += 1) {
+        const particle = particles[index];
+        const age = effectAge(particle, view.now);
+        if (!effectVisible(age, BURST_MS, BURST_MS * 0.7, 50)) continue;
+        const progress = age / BURST_MS;
+        const distance = 2.2 * view.CELL * (1 - (1 - progress) * (1 - progress));
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = particle.color;
+        ctx.fillRect(
+          Math.round(particle.x + particle.dx * distance - ART / 2),
+          Math.round(particle.y + particle.dy * distance - ART / 2),
+          ART,
+          ART
+        );
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    function drawShieldOutline(view) {
+      const snapshot = view.snapshot;
+      if (snapshot.phase !== 'running') return;
+      if (!(snapshot.shieldUntil > view.now)) return;
+      const head = snapshot.snake && snapshot.snake[0];
+      if (!head) return;
+      if (snapshot.shieldUntil - view.now <= 1000 && Math.floor(view.now / 150) % 2 === 1) return;
+      const ctx = view.ctx;
+      const left = head.x * view.CELL;
+      const top = head.y * view.CELL;
+      ctx.save();
+      ctx.fillStyle = SHIELD_COLOR;
+      ctx.fillRect(left, top, view.CELL, ART);
+      ctx.fillRect(left, top + view.CELL - ART, view.CELL, ART);
+      ctx.fillRect(left, top, ART, view.CELL);
+      ctx.fillRect(left + view.CELL - ART, top, ART, view.CELL);
+      ctx.restore();
+    }
+
+    function drawBadge(view, badge, x, y) {
+      view.drawText(view, badge.text, x + ART, y + ART, view.palette.shadow, 1);
+      view.drawText(view, badge.text, x, y, badge.color, 1);
+      const width = artTextWidth(badge.text, 1);
+      const barTop = y + 5 * ART + ART;
+      view.ctx.fillStyle = view.palette.scrim;
+      view.ctx.fillRect(x, barTop, width, ART);
+      view.ctx.fillStyle = badge.color;
+      view.ctx.fillRect(x, barTop, Math.round(width * Math.min(Math.max(badge.fraction, 0), 1)), ART);
+    }
+
+    function drawIndicators(view) {
+      const snapshot = view.snapshot;
+      // Paused boards shift deadlines on resume, so wall-clock time would be wrong here.
+      if (snapshot.phase !== 'running') return;
+      const badges = [];
+      if (snapshot.boostUntil > view.now) {
+        badges.push({ text: 'BOOST', color: BOOST_COLOR, fraction: (snapshot.boostUntil - view.now) / 3000 });
+      }
+      if (snapshot.shieldUntil > view.now) {
+        badges.push({ text: 'SHIELD', color: SHIELD_COLOR, fraction: (snapshot.shieldUntil - view.now) / 5000 });
+      }
+      if (!badges.length) return;
+      const gap = ART * 2;
+      let total = gap * (badges.length - 1);
+      for (let index = 0; index < badges.length; index += 1) total += artTextWidth(badges[index].text, 1);
+      let penX = Math.round((view.COLS * view.CELL - total) / 2);
+      for (let index = 0; index < badges.length; index += 1) {
+        drawBadge(view, badges[index], penX, ART);
+        penX += artTextWidth(badges[index].text, 1) + gap;
+      }
+    }
+
+    function drawLabels(view) {
+      for (let index = 0; index < labels.length; index += 1) {
+        const label = labels[index];
+        const age = effectAge(label, view.now);
+        if (!effectVisible(age, LABEL_MS, LABEL_MS - LABEL_BLINK_MS, 100)) continue;
+        const progress = age / LABEL_MS;
+        const kind = EFFECT_KINDS[label.kind];
+        const width = artTextWidth(kind.text, 1);
+        const left = label.x * view.CELL + view.CELL / 2 - width / 2;
+        const x = Math.min(Math.max(Math.round(left), 0), view.COLS * view.CELL - width);
+        const rising = label.y * view.CELL + view.CELL / 2 - (5 * ART) / 2 - view.CELL * progress;
+        const y = Math.max(Math.round(rising), 0);
+        view.ctx.save();
+        view.ctx.globalAlpha = Math.min(1, (1 - progress) * 2);
+        view.drawText(view, kind.text, x + ART, y + ART, view.palette.shadow, 1);
+        view.drawText(view, kind.text, x, y, kind.primary, 1);
+        view.ctx.restore();
+      }
+    }
+
+    function beforeScene(view) {
+      if (destroyed) return false;
+      prune(view.now);
+      detect(view);
+      drawShake(view);
+      return hasEffects();
+    }
+
+    function afterSnake(view) {
+      if (destroyed) return false;
+      drawFlashAndBurst(view);
+      drawShieldOutline(view);
+      return hasEffects();
+    }
+
+    function afterHud(view) {
+      if (destroyed) return false;
+      drawLabels(view);
+      drawIndicators(view);
+      return hasEffects();
+    }
+
+    renderer.addHook('beforeScene', beforeScene);
+    renderer.addHook('afterSnake', afterSnake);
+    renderer.addHook('afterHud', afterHud);
+
+    return {
+      destroy: function () {
+        if (destroyed) return;
+        destroyed = true;
+        clear();
+      }
+    };
+  };
+
   // Canvas game on top of the OSN-2 core: input methods, callbacks and the frame loop.
   window.createOrcaSnake = function (options) {
     const settings = options || {};
@@ -725,6 +1013,8 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
     const random = typeof settings.random === 'function' ? settings.random : Math.random;
 
     const renderer = window.createOrcaSnakeRenderer(settings.canvas);
+    // OSN-5 effects only add render hooks, so the core and the renderer stay untouched.
+    const effects = window.installOrcaSnakeEffects(renderer);
     let core = settings.core;
     if (!core) {
       // An explicit `storage: null` disables persistence; omitting it auto-detects localStorage.
@@ -850,6 +1140,7 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
       if (destroyed) return;
       destroyed = true;
       cancelFrame();
+      effects.destroy();
       renderer.destroy();
     }
 

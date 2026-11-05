@@ -52,7 +52,7 @@ test('a ready board has three mid-left segments and one pickup on a free cell', 
   assert.equal(state.boostUntil, 0);
   assert.equal(state.shieldUntil, 0);
   assert.equal(state.result, null);
-  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'orca', expiresAt: 10000 });
+  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'orca', expiresAt: 8000 });
   assert.ok(!state.snake.some(point => point.x === state.pickup.x && point.y === state.pickup.y));
 
   // getState hands out copies, never the mutable internals.
@@ -86,7 +86,7 @@ test('start moves one cell per step; ready and gameover boards do not advance', 
 
   // The pickup clock only starts when the run starts, so idle time does not count.
   idle.core.start();
-  assert.equal(idle.core.getState().pickup.expiresAt, 30000);
+  assert.equal(idle.core.getState().pickup.expiresAt, 28000);
   for (let i = 0; i < 17; i += 1) idle.core.step();
   assert.equal(idle.core.getState().snake[0].x, 23);
   idle.core.step();
@@ -167,7 +167,7 @@ test('pause freezes play and resume shifts pickup and effect deadlines', () => {
   clock.set(19999);
   assert.ok(core.step().pickup);
   clock.set(20000);
-  assert.equal(core.step().pickup.expiresAt, 30000);
+  assert.equal(core.step().pickup.expiresAt, 28000);
   const ready = setup();
   assert.equal(ready.core.pause(), false, 'pause on a ready game is a no-op');
   assert.equal(ready.core.getState().phase, 'ready');
@@ -343,7 +343,7 @@ test('each pickup awards its points, growth and effect', () => {
     assert.equal(collected.boostUntil, reward.boost);
     assert.equal(collected.shieldUntil, reward.shield);
     assert.equal(collected.pickup.kind, 'orca');
-    assert.equal(collected.pickup.expiresAt, 10000);
+    assert.equal(collected.pickup.expiresAt, 8000);
     assert.ok(!collected.snake.some(point => point.x === collected.pickup.x && point.y === collected.pickup.y));
     assert.equal(new Set(collected.snake.map(point => `${point.x},${point.y}`)).size, collected.snake.length);
 
@@ -380,33 +380,76 @@ test('spawn uses the injected random stream, clamps bad values and stays off the
   assert.ok(!populated.snake.some(point => point.x === populated.pickup.x && point.y === populated.pickup.y));
 });
 
-test('a pickup expires and respawns after ten active seconds', () => {
+test('a spawn rolls a whole pickup lifetime between 8 and 12 seconds', () => {
+  // The lifetime is the third spawn draw, after the cell and the kind.
+  const lifetime = roll => {
+    const clock = createClock();
+    const { core } = setup({ clock, randomValues: [0, 0, roll] });
+    return core.getState().pickup.expiresAt - clock.now();
+  };
+  assert.equal(lifetime(0), 8000);
+  assert.equal(lifetime(0.5), 10000);
+  assert.equal(lifetime(0.999999), 12000);
+  assert.equal(lifetime(1.5), 12000, 'above-range rolls clamp to the maximum');
+  assert.equal(lifetime(-1), 8000, 'negative rolls clamp to the minimum');
+  assert.equal(lifetime(Number.NaN), 8000, 'non-finite rolls use the minimum');
+  for (const roll of [0, 0.1, 0.5, 0.9, 0.999999, 1.5, -1, Number.NaN]) {
+    assert.ok(Number.isInteger(lifetime(roll)), 'lifetimes are whole milliseconds');
+  }
+});
+
+test('pickups expire at their rolled deadline and a respawn rolls again', () => {
   const clock = createClock();
-  const { core } = setup({
+  const shortest = setup({
     clock,
-    randomValues: [0.5, 0.8],
     initialState: {
       phase: 'running',
       snake: START,
       direction: 'right',
-      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 10000 }
+      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 8000 }
     }
   });
-  clock.set(9999);
-  const before = core.step();
-  assert.ok(before.pickup);
-  assert.equal(before.pickup.expiresAt, 10000);
-  clock.set(10000);
-  const respawned = core.step();
-  assert.equal(respawned.pickup.expiresAt, 20000);
-  assert.equal(respawned.pickup.kind, 'claude');
-  assert.ok(!respawned.snake.some(point => point.x === respawned.pickup.x && point.y === respawned.pickup.y));
-  clock.set(19999);
-  const kept = core.step();
-  assert.deepEqual(plain(kept.pickup), plain(respawned.pickup));
-  clock.set(20000);
-  const expired = core.step();
-  assert.equal(expired.pickup.expiresAt, 30000);
+  clock.set(7999);
+  const early = shortest.core.step();
+  assert.ok(early.pickup);
+  assert.equal(early.pickup.expiresAt, 8000, 'the shortest pickup is still there at 7999 ms');
+  clock.set(8000);
+  const replaced = shortest.core.step();
+  assert.equal(replaced.pickup.expiresAt, 16000);
+
+  const longestClock = createClock();
+  const longest = setup({
+    clock: longestClock,
+    initialState: {
+      phase: 'running',
+      snake: START,
+      direction: 'right',
+      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 12000 }
+    }
+  });
+  longestClock.set(11999);
+  const still = longest.core.step();
+  assert.ok(still.pickup);
+  assert.equal(still.pickup.expiresAt, 12000, 'the longest pickup is still there at 11999 ms');
+  longestClock.set(12000);
+  assert.equal(longest.core.step().pickup.expiresAt, 20000);
+
+  // Cell 0.5, kind 0 and lifetime 0.999999 are the three draws of the respawn.
+  const rerollClock = createClock();
+  const rerolled = setup({
+    clock: rerollClock,
+    randomValues: [0.5, 0, 0.999999],
+    initialState: {
+      phase: 'running',
+      snake: START,
+      direction: 'right',
+      pickup: { x: 0, y: 0, kind: 'orca', expiresAt: 8000 }
+    }
+  });
+  rerollClock.set(8000);
+  const fresh = rerolled.core.step();
+  assert.equal(fresh.pickup.expiresAt, 20000, 'a respawn rolls a fresh 12 second lifetime');
+  assert.equal(fresh.pickup.kind, 'orca');
 });
 
 test('filling the board with the last pickup wins the game', () => {
@@ -501,7 +544,7 @@ test('restart clears the run while keeping the loaded best score', () => {
   assert.equal(state.boostUntil, 0);
   assert.equal(state.shieldUntil, 0);
   assert.equal(state.result, null);
-  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'orca', expiresAt: 10000 });
+  assert.deepEqual(plain(state.pickup), { x: 0, y: 0, kind: 'orca', expiresAt: 8000 });
   assert.deepEqual(saved, [92]);
 });
 
