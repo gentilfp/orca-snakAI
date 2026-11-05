@@ -1,11 +1,11 @@
-# Orca snakAI 🐍🌊
+# snakAI 🐍🌊
 
 A tiny Snake game that lives inside Orca, as a side panel plugin.
 
 You steer a little green snake through the ocean and eat coding agents instead of apples.
 Watch out for the bugs.
 
-![Orca snakAI gameplay](docs/demo.gif)
+![snakAI gameplay](docs/demo.gif)
 
 ## How to play
 
@@ -39,11 +39,11 @@ In Orca:
 2. Paste this and choose **Install**:
 
    ```
-   https://github.com/gentilfp/orca-snakai#v0.1.1
+   https://github.com/gentilfp/orca-snakai#v0.1.2
    ```
 
 3. Review the access it asks for (it asks for none beyond its own panel), then enable it.
-4. Open **Orca snakAI** from the right sidebar.
+4. Open **snakAI** from the right sidebar.
 
 Click the board once so it gets the keyboard, and you're playing.
 
