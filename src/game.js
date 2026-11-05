@@ -40,7 +40,7 @@
   // OSN-5: a spawned pickup expires after a random whole number of milliseconds in [8000, 12000].
   const PICKUP_TTL_MIN_MS = 8000;
   const BOOST_FACTOR = 0.7;
-  const BEST_KEY = 'orca-snakai-best';
+  const BEST_KEY = 'snakai-best';
 
   function toInteger(value, fallback) {
     const number = Math.floor(Number(value));

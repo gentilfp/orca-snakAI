@@ -568,7 +568,7 @@ test('persistence callbacks that throw do not stop play', () => {
   assert.equal(failingLoad.core.getState().phase, 'ready');
 });
 
-test('best store uses orca-snakai-best and falls back safely when storage fails', () => {
+test('best store uses snakai-best and falls back safely when storage fails', () => {
   const values = new Map();
   const storage = {
     getItem: key => (values.has(key) ? values.get(key) : null),
@@ -577,11 +577,11 @@ test('best store uses orca-snakai-best and falls back safely when storage fails'
   const store = platform.createSnakAIBestStore({ storage });
   assert.equal(store.loadBest(), 0);
   store.saveBest(12);
-  assert.equal(values.get('orca-snakai-best'), '12');
+  assert.equal(values.get('snakai-best'), '12');
   assert.equal(store.loadBest(), 12);
   store.saveBest(7);
   assert.equal(store.loadBest(), 12);
-  assert.equal(values.get('orca-snakai-best'), '12');
+  assert.equal(values.get('snakai-best'), '12');
 
   const seeded = platform.createSnakAIBestStore({ storage: { getItem: () => '42', setItem: () => {} } });
   assert.equal(seeded.loadBest(), 42);

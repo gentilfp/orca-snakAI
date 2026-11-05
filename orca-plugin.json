@@ -1,9 +1,9 @@
 {
   "manifestVersion": 2,
-  "id": "orca-snakai",
+  "id": "snakai",
   "publisher": "gentilfp",
   "name": "Orca snakAI",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "execution": "sandboxed-ui",
   "description": "A pixel art Snake for the Orca panel. Swim through the ocean, catch coding agents and dodge the bugs.",
   "license": "MIT",

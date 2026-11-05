@@ -349,7 +349,7 @@ test('the renderer ignores calls after destroy', () => {
 });
 
 test('without a core the controller builds one and reads the stored best', () => {
-  const values = new Map([['orca-snakai-best', '42']]);
+  const values = new Map([['snakai-best', '42']]);
   const storage = {
     getItem: key => (values.has(key) ? values.get(key) : null),
     setItem: (key, value) => values.set(key, String(value))

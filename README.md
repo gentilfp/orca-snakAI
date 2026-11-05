@@ -39,7 +39,7 @@ In Orca:
 2. Paste this and choose **Install**:
 
    ```
-   https://github.com/gentilfp/orca-snakai#v0.1.0
+   https://github.com/gentilfp/orca-snakai#v0.1.1
    ```
 
 3. Review the access it asks for (it asks for none beyond its own panel), then enable it.
@@ -53,7 +53,7 @@ Click the board once so it gets the keyboard, and you're playing.
 git clone https://github.com/gentilfp/orca-snakAI.git
 cd orca-snakAI
 orca plugin dev load .
-orca plugin open gentilfp.orca-snakai --panel snakai
+orca plugin open gentilfp.snakai --panel snakai
 ```
 
 Orca may print a fingerprint the first time. Re-run the `load` command with `--approve <fingerprint>`.

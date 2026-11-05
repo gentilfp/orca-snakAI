@@ -8,10 +8,10 @@ const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'
 const CSP = "default-src 'none'; connect-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'";
 const MARKERS = ['/* PANEL_STYLES */', '/* GAME_ENGINE */', '/* PANEL_CONTROLLER */'];
 
-test('manifest describes the sandboxed orca-snakai panel', () => {
+test('manifest describes the sandboxed snakai panel', () => {
   const manifest = JSON.parse(read('orca-plugin.json'));
   assert.equal(manifest.manifestVersion, 2);
-  assert.equal(manifest.id, 'orca-snakai');
+  assert.equal(manifest.id, 'snakai');
   assert.equal(manifest.publisher, 'gentilfp');
   assert.equal(manifest.execution, 'sandboxed-ui');
   assert.deepEqual(manifest.capabilities, []);
