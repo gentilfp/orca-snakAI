@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'">
-<title>Orca Snake</title>
+<title>Orca snakAI</title>
 <style>:root {
   color-scheme: light;
   --page: var(--orca-background, #f4f9fc);
@@ -28,11 +28,11 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 </head>
 <body>
 <main>
-  <h1 class="sr-only">Orca Snake</h1>
-  <div class="playfield" id="playfield"><canvas id="game" tabindex="0" width="720" height="540" aria-label="Orca Snake. Arrow keys or WASD to steer, P or Escape to pause, Space to restart."></canvas></div>
+  <h1 class="sr-only">Orca snakAI</h1>
+  <div class="playfield" id="playfield"><canvas id="game" tabindex="0" width="720" height="540" aria-label="Orca snakAI. Arrow keys or WASD to steer, P or Escape to pause, Space to restart."></canvas></div>
   <p id="announcement" class="status" aria-live="polite"></p>
 </main>
-<script>/* Orca Snake — original canvas game. Copyright (c) 2026 gentilfp. MIT. */
+<script>/* Orca snakAI — original canvas game. Copyright (c) 2026 gentilfp. MIT. */
 (function () {
   'use strict';
   const COLUMNS = 24;
@@ -842,7 +842,7 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 
   window.createOrcaSnakeRenderer = function (canvas) {
     const ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
-    if (!ctx) throw new Error('Orca Snake needs a 2D canvas.');
+    if (!ctx) throw new Error('Orca snakAI needs a 2D canvas.');
     ctx.imageSmoothingEnabled = false;
 
     const hooks = Object.create(null);
@@ -1175,7 +1175,7 @@ canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
   // Registers three render hooks. Idle hooks draw nothing and return false, so OSN-3 is unaffected.
   window.installOrcaSnakeEffects = function (renderer) {
     if (!renderer || typeof renderer.addHook !== 'function') {
-      throw new Error('Orca Snake effects need a renderer.');
+      throw new Error('Orca snakAI effects need a renderer.');
     }
 
     let labels = [];

@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "orca-snake",
   "publisher": "gentilfp",
-  "name": "Orca Snake",
+  "name": "Orca snakAI",
   "version": "0.1.0",
   "execution": "sandboxed-ui",
   "description": "A pixel art Snake for the Orca panel. Swim through the ocean, catch coding agents and dodge the bugs.",
@@ -11,10 +11,10 @@
   "engines": { "orca": ">=1.4.245" },
   "cover": {
     "path": "images/cover.png",
-    "alt": "Orca Snake: a green snake swims through a dark pixel art ocean towards a rare orca, with a red bug nearby and the score above."
+    "alt": "Orca snakAI: a green snake swims through a dark pixel art ocean towards a rare orca, with a red bug nearby and the score above."
   },
   "contributes": {
-    "panels": [{ "id": "snake", "title": "Orca Snake", "icon": "bot", "entry": "panel/index.html" }]
+    "panels": [{ "id": "snake", "title": "Orca snakAI", "icon": "bot", "entry": "panel/index.html" }]
   },
   "capabilities": []
 }

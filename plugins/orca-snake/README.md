@@ -1,11 +1,11 @@
-# Orca Snake 🐍🌊
+# Orca snakAI 🐍🌊
 
 A tiny Snake game that lives inside Orca, as a side panel plugin.
 
 You steer a little green snake through the ocean and eat coding agents instead of apples.
 Watch out for the bugs.
 
-![Orca Snake gameplay](../../docs/demo.gif)
+![Orca snakAI gameplay](../../docs/demo.gif)
 
 ## How to play
 
@@ -41,7 +41,7 @@ orca plugin open gentilfp.orca-snake --panel snake
 ```
 
 Orca may print a fingerprint the first time. Re-run the `load` command with `--approve <fingerprint>`.
-Or open the panel from the **Orca Snake** icon in the right sidebar.
+Or open the panel from the **Orca snakAI** icon in the right sidebar.
 
 No Orca? Open `plugins/orca-snake/dev.html` in any browser and play there.
 

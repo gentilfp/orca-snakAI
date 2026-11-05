@@ -1,4 +1,4 @@
-/* Orca Snake — original canvas game. Copyright (c) 2026 gentilfp. MIT. */
+/* Orca snakAI — original canvas game. Copyright (c) 2026 gentilfp. MIT. */
 (function () {
   'use strict';
   const COLUMNS = 24;
@@ -808,7 +808,7 @@
 
   window.createOrcaSnakeRenderer = function (canvas) {
     const ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
-    if (!ctx) throw new Error('Orca Snake needs a 2D canvas.');
+    if (!ctx) throw new Error('Orca snakAI needs a 2D canvas.');
     ctx.imageSmoothingEnabled = false;
 
     const hooks = Object.create(null);
@@ -1141,7 +1141,7 @@
   // Registers three render hooks. Idle hooks draw nothing and return false, so OSN-3 is unaffected.
   window.installOrcaSnakeEffects = function (renderer) {
     if (!renderer || typeof renderer.addHook !== 'function') {
-      throw new Error('Orca Snake effects need a renderer.');
+      throw new Error('Orca snakAI effects need a renderer.');
     }
 
     let labels = [];
